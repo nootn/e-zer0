@@ -12,6 +12,9 @@ export interface Env {
     // Auto-generated secrets (stored in D1 app_settings, optionally overridden via wrangler secret)
     ENCRYPTION_KEY?: string;
     JWT_SECRET?: string;
+
+    // Rate Limiting KV
+    RATE_LIMITER: KVNamespace;
 }
 
 // Database row types

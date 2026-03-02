@@ -39,12 +39,19 @@ export async function searchSimilar(
     ai: Ai | undefined,
     query: string,
     topK = 10,
-    accountId?: number
+    accountIds?: number[]
 ): Promise<Array<{ accountId: number; messageId: string; score: number }>> {
     if (!vectorIndex || !ai) return []; // Return empty in local dev
     const queryEmbedding = await generateEmbedding(ai, query);
 
-    const filter = accountId ? { account_id: accountId } : undefined;
+    let filter: any = undefined;
+    if (accountIds && accountIds.length > 0) {
+        if (accountIds.length === 1) {
+            filter = { account_id: accountIds[0] };
+        } else {
+            filter = { account_id: { $in: accountIds } };
+        }
+    }
 
     const results = await vectorIndex.query(queryEmbedding, {
         topK,

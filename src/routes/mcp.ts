@@ -4,6 +4,7 @@ import type { Env, McpClient } from '../types';
 import { verifyPassword } from '../lib/crypto';
 import { createMcpServer } from '../mcp/server';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { checkRateLimit, incrementRateLimit, clearRateLimit } from '../lib/rate-limit';
 
 const mcp = new Hono<{ Bindings: Env }>();
 
@@ -78,20 +79,32 @@ mcp.post('/token', async (c) => {
         return c.json({ error: 'client_id and client_secret are required' }, 400);
     }
 
+    // Rate limiting key
+    const ip = c.req.header('CF-Connecting-IP') || 'unknown';
+    const rlKey = `rate_limit:mcp:${ip}:${clientId}`;
+
+    if (!(await checkRateLimit(c.env.RATE_LIMITER, rlKey))) {
+        return c.json({ error: 'Too many failed attempts. Try again in 15 minutes.' }, 429);
+    }
+
     // Look up client
     const client = await c.env.DB.prepare('SELECT * FROM mcp_clients WHERE client_id = ? AND is_active = 1')
         .bind(clientId)
         .first<McpClient>();
 
     if (!client) {
+        await incrementRateLimit(c.env.RATE_LIMITER, rlKey);
         return c.json({ error: 'invalid_client' }, 401);
     }
 
     // Verify secret
     const valid = await verifyPassword(clientSecret, client.secret_hash, client.salt);
     if (!valid) {
+        await incrementRateLimit(c.env.RATE_LIMITER, rlKey);
         return c.json({ error: 'invalid_client' }, 401);
     }
+
+    await clearRateLimit(c.env.RATE_LIMITER, rlKey);
 
     // Update last_used_at
     await c.env.DB.prepare('UPDATE mcp_clients SET last_used_at = datetime(?) WHERE id = ?')
@@ -133,6 +146,15 @@ mcp.post('/', async (c) => {
     const clientId = payload.sub as string;
     const clientName = (payload.name as string) || null;
 
+    // Phase 3: Synchronously check if the client was revoked *after* the token was issued
+    const clientStatus = await c.env.DB.prepare('SELECT is_active FROM mcp_clients WHERE client_id = ?')
+        .bind(clientId)
+        .first<{ is_active: number }>();
+
+    if (!clientStatus || clientStatus.is_active !== 1) {
+        return c.json({ error: 'Client revoked or not found' }, 401);
+    }
+
     // Create a fresh MCP server for this request
     const server = createMcpServer(c.env, clientId, clientName);
 
@@ -153,7 +175,19 @@ mcp.post('/', async (c) => {
 });
 
 // ── Health check ────────────────────────────────────────
-mcp.get('/', (c) => {
+mcp.get('/', async (c) => {
+    // Restrict verbosity for unauthenticated users (finding #11)
+    const authHeader = c.req.header('Authorization');
+    let isAuthenticated = false;
+    if (authHeader?.startsWith('Bearer ')) {
+        const payload = await verifyJwt(authHeader.substring(7), c.env.JWT_SECRET!);
+        if (payload) isAuthenticated = true;
+    }
+
+    if (!isAuthenticated) {
+        return c.json({ status: 'ok' });
+    }
+
     return c.json({
         name: 'e-zer0 MCP Server',
         version: '1.0.0',

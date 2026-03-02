@@ -13,7 +13,7 @@ export async function createSession(db: D1Database, userId: number): Promise<{ t
         .bind(userId, token, expiresAt)
         .run();
 
-    const cookie = `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${SESSION_DURATION_HOURS * 3600}`;
+    const cookie = `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_DURATION_HOURS * 3600}`;
     return { token, cookie };
 }
 
@@ -53,7 +53,7 @@ export async function destroySession(db: D1Database, cookieHeader: string | unde
             await db.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
         }
     }
-    return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
+    return `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 }
 
 function parseCookie(cookieHeader: string, name: string): string | null {

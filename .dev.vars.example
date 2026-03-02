@@ -1,0 +1,12 @@
+# Local development secrets for Cloudflare Workers (wrangler dev)
+# Copy this file to .dev.vars and fill in the values:
+#   cp .dev.vars.example .dev.vars
+#
+# These are REQUIRED for the application to start.
+# Generate random 32-byte hex keys with:
+#   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+#
+# Alternatively, run `npm run setup-cf` which generates keys automatically.
+
+ENCRYPTION_KEY=<replace-with-64-char-hex-string>
+JWT_SECRET=<replace-with-64-char-hex-string>

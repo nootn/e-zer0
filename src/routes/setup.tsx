@@ -4,13 +4,18 @@ import type { Env, AdminUser } from '../types';
 import { Layout, Alert } from '../views/layout';
 import { generateSalt, hashPassword } from '../lib/crypto';
 import { createSession } from '../lib/session';
-import { generateAndStoreKeys } from '../lib/keys';
 
 const setup = new Hono<{ Bindings: Env }>();
 
 setup.get('/', async (c) => {
     return c.html(
         <Layout title="Initial Setup">
+            {(!c.env.ENCRYPTION_KEY || !c.env.JWT_SECRET) && (
+                <Alert type="error">
+                    <strong>Critical Security Warning:</strong> Deployment missing root keys. Please ensure
+                    ENCRYPTION_KEY and JWT_SECRET are set via Cloudflare Secrets or .dev.vars.
+                </Alert>
+            )}
             <div class="card">
                 <h2 style="font-size:18px; font-weight:600; margin-bottom:6px;">Create Admin Account</h2>
                 <p style="color:var(--text-muted); font-size:14px; margin-bottom:24px;">
@@ -91,6 +96,20 @@ setup.post('/', async (c) => {
         );
     }
 
+    if (username.length > 255) {
+        return c.html(
+            <Layout title="Initial Setup">
+                <Alert type="error">Username cannot exceed 255 characters.</Alert>
+                <div class="card">
+                    <a href="/setup" class="btn btn-ghost btn-full">
+                        Try Again
+                    </a>
+                </div>
+            </Layout>,
+            400
+        );
+    }
+
     if (password !== confirm) {
         return c.html(
             <Layout title="Initial Setup">
@@ -132,9 +151,6 @@ setup.post('/', async (c) => {
     const result = await c.env.DB.prepare('INSERT INTO admin_users (username, password_hash, salt) VALUES (?, ?, ?)')
         .bind(username, hash, salt)
         .run();
-
-    // Auto-generate encryption and JWT keys (stored in D1)
-    await generateAndStoreKeys(c.env.DB);
 
     // Create session and redirect to dashboard
     const userId = result.meta.last_row_id as number;

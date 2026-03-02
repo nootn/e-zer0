@@ -279,7 +279,8 @@ settings.post('/google', async (c) => {
             '/settings?message=' + encodeURIComponent('Google credentials saved! You can now add Gmail accounts.')
         );
     } catch (err: any) {
-        return c.redirect('/settings?error=' + encodeURIComponent(err.message));
+        console.error('Settings Error (Google):', err);
+        return c.redirect('/settings?error=' + encodeURIComponent('Failed to save Google credentials.'));
     }
 });
 
@@ -302,7 +303,8 @@ settings.post('/microsoft', async (c) => {
                 encodeURIComponent('Microsoft credentials saved! You can now add Outlook/M365 accounts.')
         );
     } catch (err: any) {
-        return c.redirect('/settings?error=' + encodeURIComponent(err.message));
+        console.error('Settings Error (Microsoft):', err);
+        return c.redirect('/settings?error=' + encodeURIComponent('Failed to save Microsoft credentials.'));
     }
 });
 

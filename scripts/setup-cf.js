@@ -1,17 +1,85 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
+import crypto from 'crypto';
 
-// This script runs in GitHub Actions to auto-provision Cloudflare resources
+// This script handles two tasks:
+// 1. LOCAL: Generate ENCRYPTION_KEY + JWT_SECRET into .dev.vars (always runs)
+// 2. REMOTE: Provision Cloudflare resources (D1, Vectorize, KV) — only when authenticated
+//
+// Usage:
+//   npm run setup-cf              # Generates local keys; skips remote if unauthenticated
+//   npm run setup-cf              # In GitHub Actions with CLOUDFLARE_API_TOKEN → full provisioning
+
 const instanceName = process.env.INSTANCE_NAME || 'e-zer0';
 
+// 1. Sanitize and validate INSTANCE_NAME to prevent command injection
+if (!/^[a-zA-Z0-9-]+$/.test(instanceName)) {
+    console.error('Error: INSTANCE_NAME must contain only alphanumeric characters and hyphens.');
+    process.exit(1);
+}
+
+// ── Step 1: Generate local development keys (always runs) ───────────────
+console.log('Checking for local development keys in .dev.vars...');
+let devVars = '';
+if (fs.existsSync('.dev.vars')) {
+    devVars = fs.readFileSync('.dev.vars', 'utf8');
+}
+
+let encryptionKey = '';
+let jwtSecret = '';
+
+const encMatch = devVars.match(/^ENCRYPTION_KEY=(.+)$/m);
+if (encMatch) encryptionKey = encMatch[1].trim();
+else encryptionKey = crypto.randomBytes(32).toString('hex');
+
+const jwtMatch = devVars.match(/^JWT_SECRET=(.+)$/m);
+if (jwtMatch) jwtSecret = jwtMatch[1].trim();
+else jwtSecret = crypto.randomBytes(32).toString('hex');
+
+if (!encMatch || !jwtMatch) {
+    console.log('Generating new keys and saving to .dev.vars...');
+    const newDevVars = `ENCRYPTION_KEY=${encryptionKey}\nJWT_SECRET=${jwtSecret}\n`;
+    fs.writeFileSync('.dev.vars', newDevVars);
+    console.log('✅ .dev.vars created with ENCRYPTION_KEY and JWT_SECRET');
+} else {
+    console.log('✅ .dev.vars already has both keys — no changes needed.');
+}
+
+// ── Step 2: Check if we can reach Cloudflare (optional for local dev) ───
+let isAuthenticated = false;
 try {
+    execSync('npx wrangler whoami', { stdio: 'ignore' });
+    isAuthenticated = true;
+} catch (e) {
+    // Not authenticated — that's fine for local dev
+}
+
+if (!isAuthenticated) {
+    console.log('');
+    console.log('ℹ️  Not authenticated to Cloudflare — skipping remote resource provisioning.');
+    console.log('   This is normal for local development. Your .dev.vars keys are ready.');
+    console.log('   Run `npm run db:migrate:local` next, then `npm run dev`.');
+    console.log('');
+    console.log('   To provision remote resources (for deployment), authenticate first:');
+    console.log('     npx wrangler login');
+    console.log('     npm run setup-cf');
+    console.log('');
+    console.log('Setup complete (local only)!');
+    process.exit(0);
+}
+
+// ── Step 3: Provision remote Cloudflare resources ───────────────────────
+try {
+    console.log('');
+    console.log('Authenticated to Cloudflare — provisioning remote resources...');
+
     console.log(`Checking/Creating D1 Database: ${instanceName}-db...`);
     let dbId = '';
     try {
-        const info = execSync(`npx wrangler d1 info ${instanceName}-db --json`, { encoding: 'utf8' });
+        const info = execSync(`npx wrangler d1 info ${instanceName}-db --json`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
         dbId = JSON.parse(info).uuid;
     } catch (e) {
-        const create = execSync(`npx wrangler d1 create ${instanceName}-db`, { encoding: 'utf8' });
+        const create = execSync(`npx wrangler d1 create ${instanceName}-db`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
         const match = create.match(/database_id = "([^"]+)"/);
         if (match) dbId = match[1];
     }
@@ -21,6 +89,26 @@ try {
         execSync(`npx wrangler vectorize get ${instanceName}-index`, { stdio: 'ignore' });
     } catch (e) {
         execSync(`npx wrangler vectorize create ${instanceName}-index --dimensions=384 --metric=cosine`, { stdio: 'inherit' });
+    }
+
+    console.log(`Checking/Creating KV Namespace: RATE_LIMITER...`);
+    let kvId = '';
+    try {
+        const kvInfo = execSync(`npx wrangler kv namespace create RATE_LIMITER --binding RATE_LIMITER`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+        const match = kvInfo.match(/id = "([^"]+)"/);
+        if (match) kvId = match[1];
+    } catch (e) {
+        const list = execSync(`npx wrangler kv namespace list`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+        const namespaces = JSON.parse(list);
+        const ns = namespaces.find(n => n.title.includes('RATE_LIMITER'));
+        if (ns) {
+            kvId = ns.id;
+        }
+    }
+
+    if (!kvId) {
+        console.error('FATAL: Could not create or find RATE_LIMITER KV namespace. Rate limiting requires this binding.');
+        process.exit(1);
     }
 
     const toml = `
@@ -37,10 +125,27 @@ database_id = "${dbId}"
 [[vectorize]]
 binding = "VECTOR_INDEX"
 index_name = "${instanceName}-index"
+
+[[kv_namespaces]]
+binding = "RATE_LIMITER"
+id = "${kvId}"
 `;
 
     fs.writeFileSync('wrangler.toml', toml.trim());
-    console.log('wrangler.toml generated successfully!');
+    console.log('✅ wrangler.toml generated with remote resource IDs.');
+
+    // Push secrets to Cloudflare
+    try {
+        console.log('Pushing secrets to Cloudflare...');
+        execSync(`npx wrangler secret put ENCRYPTION_KEY`, { input: encryptionKey, stdio: ['pipe', 'ignore', 'ignore'] });
+        execSync(`npx wrangler secret put JWT_SECRET`, { input: jwtSecret, stdio: ['pipe', 'ignore', 'ignore'] });
+        console.log('✅ Secrets pushed to Cloudflare.');
+    } catch (e) {
+        console.log('⚠️  Could not push secrets to Cloudflare (non-fatal).');
+    }
+
+    console.log('');
+    console.log('Setup complete (local + remote)!');
 } catch (error) {
     console.error('Setup failed:', error);
     process.exit(1);

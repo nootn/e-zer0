@@ -1,6 +1,6 @@
 // Crypto utilities using Web Crypto API (available in Cloudflare Workers)
 
-const PBKDF2_ITERATIONS = 100_000;
+const PBKDF2_ITERATIONS = 210_000;
 const SALT_LENGTH = 16;
 const AES_KEY_LENGTH = 256;
 const IV_LENGTH = 12;

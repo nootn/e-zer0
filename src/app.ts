@@ -2,7 +2,6 @@ import { Hono } from 'hono';
 import type { Env } from './types';
 import { authMiddleware } from './middleware/auth';
 import { destroySession } from './lib/session';
-import { getEncryptionKey, getJwtSecret } from './lib/keys';
 
 // Route imports
 import setupRoutes from './routes/setup';
@@ -15,24 +14,31 @@ import settingsRoutes from './routes/settings';
 import oauthRoutes from './routes/oauth-callback';
 import mcpRoutes from './routes/mcp';
 
+import { csrf } from 'hono/csrf';
+import { secureHeaders } from 'hono/secure-headers';
+
 const app = new Hono<{ Bindings: Env; Variables: { userId: number; username: string } }>();
 
-// Resolve auto-generated keys from D1 (before auth middleware)
+// finding #8: Add Security Headers
+app.use('*', secureHeaders());
+
+// Startup guard: ensure critical bindings are present
 app.use('*', async (c, next) => {
-    try {
-        if (!c.env.ENCRYPTION_KEY) {
-            const key = await getEncryptionKey(c.env);
-            if (key) (c.env as any).ENCRYPTION_KEY = key;
-        }
-        if (!c.env.JWT_SECRET) {
-            const secret = await getJwtSecret(c.env);
-            if (secret) (c.env as any).JWT_SECRET = secret;
-        }
-    } catch {
-        // Pre-setup state — tables may not exist yet
+    if (!c.env.RATE_LIMITER) {
+        console.error('FATAL MISCONFIGURATION: RATE_LIMITER KV namespace is not bound. Check wrangler.toml.');
+        return c.text('Service misconfigured: missing RATE_LIMITER KV binding. Run `npm run setup-cf` to fix.', 503);
     }
     await next();
 });
+
+// finding #7: CSRF protection on mutation routes (UI only)
+const csrfProtection = csrf();
+app.use('/settings/*', csrfProtection);
+app.use('/agents/*', csrfProtection);
+app.use('/accounts/*', csrfProtection);
+app.use('/setup/*', csrfProtection);
+app.use('/login', csrfProtection);
+app.use('/logout', csrfProtection);
 
 // Global auth middleware
 app.use('*', authMiddleware);

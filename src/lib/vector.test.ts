@@ -74,7 +74,7 @@ describe('searchSimilar', () => {
             }),
         } as any;
 
-        const results = await searchSimilar(mockIndex, mockAi, 'flights', 5, 1);
+        const results = await searchSimilar(mockIndex, mockAi, 'flights', 5, [1]);
 
         expect(results).toHaveLength(1);
         expect(results[0]).toEqual({ accountId: 1, messageId: 'msg1', score: 0.9 });

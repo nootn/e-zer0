@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { setSignedCookie, getSignedCookie, deleteCookie } from 'hono/cookie';
 import type { Env } from '../types';
 import { encrypt } from '../lib/crypto';
 import { getGoogleAuthUrl, exchangeGoogleCode, getGoogleUserEmail } from '../lib/oauth/google';
@@ -30,15 +31,34 @@ oauth.get('/google/start', async (c) => {
     const state = generateToken();
     const redirectUri = `${getBaseUrl(c.req.raw)}/oauth/google/callback`;
     const authUrl = getGoogleAuthUrl(creds.clientId, redirectUri, state);
+
+    // Set a short-lived signed cookie to prevent OAuth CSRF (finding #5)
+    await setSignedCookie(c, 'oauth_state', state, c.env.JWT_SECRET!, {
+        path: '/',
+        secure: true,
+        httpOnly: true,
+        maxAge: 600, // 10 minutes
+        sameSite: 'Lax', // Must be lax for cross-site redirect to work
+    });
+
     return c.redirect(authUrl);
 });
 
 oauth.get('/google/callback', async (c) => {
     const code = c.req.query('code');
+    const state = c.req.query('state');
     const error = c.req.query('error');
 
     if (error || !code) {
         return c.redirect('/accounts?error=' + encodeURIComponent('Google OAuth was denied or failed.'));
+    }
+
+    // Verify OAuth CSRF State (finding #5)
+    const storedState = await getSignedCookie(c, c.env.JWT_SECRET!, 'oauth_state');
+    deleteCookie(c, 'oauth_state');
+
+    if (!storedState || storedState !== state) {
+        return c.redirect('/accounts?error=' + encodeURIComponent('Security verification failed. Please try again.'));
     }
 
     try {
@@ -62,7 +82,8 @@ oauth.get('/google/callback', async (c) => {
 
         return c.redirect('/accounts?message=' + encodeURIComponent(`Gmail account ${email} connected!`));
     } catch (err: any) {
-        return c.redirect('/accounts?error=' + encodeURIComponent(err.message || 'Google OAuth failed.'));
+        console.error('Google OAuth Error:', err);
+        return c.redirect('/accounts?error=' + encodeURIComponent('Google OAuth failed. Please try again.'));
     }
 });
 
@@ -82,15 +103,34 @@ oauth.get('/microsoft/start', async (c) => {
     const state = generateToken();
     const redirectUri = `${getBaseUrl(c.req.raw)}/oauth/microsoft/callback`;
     const authUrl = getMicrosoftAuthUrl(creds.clientId, redirectUri, state);
+
+    // Set a short-lived signed cookie to prevent OAuth CSRF (finding #5)
+    await setSignedCookie(c, 'oauth_state', state, c.env.JWT_SECRET!, {
+        path: '/',
+        secure: true,
+        httpOnly: true,
+        maxAge: 600, // 10 minutes
+        sameSite: 'Lax', // Must be lax for cross-site redirect to work
+    });
+
     return c.redirect(authUrl);
 });
 
 oauth.get('/microsoft/callback', async (c) => {
     const code = c.req.query('code');
+    const state = c.req.query('state');
     const error = c.req.query('error');
 
     if (error || !code) {
         return c.redirect('/accounts?error=' + encodeURIComponent('Microsoft OAuth was denied or failed.'));
+    }
+
+    // Verify OAuth CSRF State (finding #5)
+    const storedState = await getSignedCookie(c, c.env.JWT_SECRET!, 'oauth_state');
+    deleteCookie(c, 'oauth_state');
+
+    if (!storedState || storedState !== state) {
+        return c.redirect('/accounts?error=' + encodeURIComponent('Security verification failed. Please try again.'));
     }
 
     try {
@@ -114,7 +154,8 @@ oauth.get('/microsoft/callback', async (c) => {
 
         return c.redirect('/accounts?message=' + encodeURIComponent(`Outlook account ${email} connected!`));
     } catch (err: any) {
-        return c.redirect('/accounts?error=' + encodeURIComponent(err.message || 'Microsoft OAuth failed.'));
+        console.error('Microsoft OAuth Error:', err);
+        return c.redirect('/accounts?error=' + encodeURIComponent('Microsoft OAuth failed. Please try again.'));
     }
 });
 

@@ -66,7 +66,7 @@ async function getAccountToken(
         .first();
 
     if (!permitted) {
-        throw new Error(`Unauthorized: Agent does not have access to account ${accountId}`);
+        throw new Error(`Account not found or access denied`);
     }
 
     const account = await db
@@ -74,8 +74,8 @@ async function getAccountToken(
         .bind(accountId, 'active')
         .first<EmailAccount>();
 
-    if (!account) throw new Error(`Account ${accountId} not found or not active`);
-    if (!account.encrypted_access_token) throw new Error(`Account ${accountId} has no access token`);
+    if (!account) throw new Error(`Account not found or access denied`);
+    if (!account.encrypted_access_token) throw new Error(`Account not found or access denied`);
 
     const accessToken = await decrypt(account.encrypted_access_token, encryptionKey);
     return { account, accessToken };
@@ -225,7 +225,27 @@ export async function searchEmailsSemantic(
     accountId?: number,
     topK = 10
 ): Promise<any> {
-    const results = await searchSimilar(env.VECTOR_INDEX, env.AI, query, topK, accountId);
+    // 1. Pre-filter by authorized accounts to prevent vector metadata leakage
+    const allowed = await env.DB.prepare(
+        `SELECT email_account_id FROM mcp_client_accounts mca
+         JOIN mcp_clients mc ON mc.id = mca.mcp_client_id
+         WHERE mc.client_id = ?`
+    )
+        .bind(clientId)
+        .all<{ email_account_id: number }>();
+
+    const allowedAccountIds = allowed.results.map((r) => r.email_account_id);
+    if (allowedAccountIds.length === 0) return { query, results: [] };
+
+    let searchIds = allowedAccountIds;
+    if (accountId) {
+        if (!allowedAccountIds.includes(accountId)) {
+            return { query, results: [] }; // Unauthorized specifically requested account
+        }
+        searchIds = [accountId];
+    }
+
+    const results = await searchSimilar(env.VECTOR_INDEX, env.AI, query, topK, searchIds);
 
     // Fetch full message details for top results
     const enrichedResults = [];
@@ -261,13 +281,8 @@ export async function searchEmailsSemantic(
                 },
             });
         } catch (e) {
-            // Skip messages we can't fetch
-            enrichedResults.push({
-                message_id: result.messageId,
-                score: result.score,
-                account_id: result.accountId,
-                error: 'Could not fetch message',
-            });
+            // Drop unauthorized or failed messages entirely to prevent data leakage/enumeration
+            continue;
         }
     }
 

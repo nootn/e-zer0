@@ -4,6 +4,7 @@ import type { Env, AdminUser } from '../types';
 import { Layout, Alert } from '../views/layout';
 import { verifyPassword } from '../lib/crypto';
 import { createSession } from '../lib/session';
+import { checkRateLimit, incrementRateLimit, clearRateLimit } from '../lib/rate-limit';
 
 const login = new Hono<{ Bindings: Env }>();
 
@@ -62,18 +63,39 @@ login.post('/', async (c) => {
         return c.redirect('/login?error=' + encodeURIComponent('All fields are required.'));
     }
 
+    if (username.length > 255) {
+        return c.redirect('/login?error=' + encodeURIComponent('Username too long.'));
+    }
+
+    const ip = c.req.header('CF-Connecting-IP') || 'unknown';
+    const rlKey = `rate_limit:login:${ip}:${username}`;
+
+    if (!(await checkRateLimit(c.env.RATE_LIMITER, rlKey))) {
+        return c.redirect('/login?error=' + encodeURIComponent('Too many failed attempts. Try again in 15 minutes.'));
+    }
+
     const user = await c.env.DB.prepare('SELECT * FROM admin_users WHERE username = ?')
         .bind(username)
         .first<AdminUser>();
 
     if (!user) {
+        await incrementRateLimit(c.env.RATE_LIMITER, rlKey);
         return c.redirect('/login?error=' + encodeURIComponent('Invalid username or password.'));
     }
 
     const valid = await verifyPassword(password, user.password_hash, user.salt);
     if (!valid) {
+        await incrementRateLimit(c.env.RATE_LIMITER, rlKey);
         return c.redirect('/login?error=' + encodeURIComponent('Invalid username or password.'));
     }
+
+    await clearRateLimit(c.env.RATE_LIMITER, rlKey);
+
+    // Rotate session (invalidate old ones) finding #12
+    await c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user.id).run();
+
+    // Background cleanup of expired sessions generically (finding #13)
+    c.env.DB.prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run().catch(console.error);
 
     const session = await createSession(c.env.DB, user.id);
 

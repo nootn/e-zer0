@@ -19,6 +19,14 @@ migrations_dir = "migrations"
 # [ai]
 # binding = "AI"
 
+# ── Rate Limiting KV ─────────────────────────────────────
+# Required for brute-force protection on /login and /mcp/token.
+# The id below is a placeholder for local dev; setup-cf.js overwrites it for production.
+[[kv_namespaces]]
+binding = "RATE_LIMITER"
+id = "local"
+preview_id = "local"
+
 # ── Cron Triggers (uncomment for remote deploy) ─────────
 # [triggers]
 # crons = ["0 * * * *"]
