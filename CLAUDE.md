@@ -4,16 +4,16 @@ Full agent instructions and coding standards: @AGENTS.md
 
 ## Commands
 
-| Task | Command |
-|------|---------|
-| Dev server | `npm run dev` |
-| Quality gate (format + lint + test) | `npm run check` |
-| Format | `npm run format` |
-| Type-check / lint | `npm run lint` |
-| Tests | `npm run test` |
-| Apply local DB migrations | `npm run db:migrate:local` |
-| Reset local DB | `npm run db:reset:local:unix` |
-| Deploy | `npm run deploy` |
+| Task                                | Command                       |
+| ----------------------------------- | ----------------------------- |
+| Dev server                          | `npm run dev`                 |
+| Quality gate (format + lint + test) | `npm run check`               |
+| Format                              | `npm run format`              |
+| Type-check / lint                   | `npm run lint`                |
+| Tests                               | `npm run test`                |
+| Apply local DB migrations           | `npm run db:migrate:local`    |
+| Reset local DB                      | `npm run db:reset:local:unix` |
+| Deploy                              | `npm run deploy`              |
 
 ## Runtime constraint
 
