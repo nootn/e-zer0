@@ -25,3 +25,8 @@ Thumbs.db
 
 # Generated config (created by setup-cf.js in CI)
 # wrangler.toml is committed for local dev, but CI regenerates it
+
+# Claude Code — local-only files (not shared with team)
+# CLAUDE.md and AGENTS.md ARE committed (shared instructions)
+CLAUDE.local.md
+.claude/settings.local.json
