@@ -1,0 +1,35 @@
+{
+    "name": "e-zer0",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "wrangler dev",
+        "deploy": "wrangler deploy",
+        "db:migrate:local": "wrangler d1 migrations apply e-zer0-db --local",
+        "db:migrate:remote": "wrangler d1 migrations apply e-zer0-db --remote",
+        "db:reset:local": "rd /s /q .wrangler\\\\state 2>nul & echo Local DB wiped. && npm run db:migrate:local",
+        "db:reset:local:unix": "rm -rf .wrangler/state && echo 'Local DB wiped.' && npm run db:migrate:local",
+        "db:studio": "wrangler d1 execute e-zer0-db --local --command \"SELECT name FROM sqlite_master WHERE type='table'\"",
+        "setup-cf": "node scripts/setup-cf.js",
+        "typecheck": "tsc --noEmit",
+        "lint": "tsc --noEmit",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "format": "prettier --write \"src/**/*.{ts,tsx}\" \"*.{json,md}\"",
+        "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"*.{json,md}\"",
+        "check": "npm run format:check && npm run lint && npm run test"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.12.1",
+        "hono": "^4.7.6",
+        "zod": "^3.24.4"
+    },
+    "devDependencies": {
+        "@cloudflare/workers-types": "^4.20250224.0",
+        "prettier": "^3.5.3",
+        "typescript": "^5.7.3",
+        "vitest": "^3.0.9",
+        "wrangler": "^4.6.0"
+    }
+}

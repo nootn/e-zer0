@@ -1,0 +1,394 @@
+// MCP Server setup using @modelcontextprotocol/sdk
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import type { Env } from '../types';
+import {
+    listConnectedAccounts,
+    readRecentEmails,
+    manageEmail,
+    organizeEmail,
+    listEmailFolders,
+    searchEmailsSemantic,
+    logAudit,
+    listEmailRules,
+    createEmailRule,
+    updateEmailRule,
+    deleteEmailRule,
+} from './tools';
+
+export function createMcpServer(env: Env, clientId: string, clientName: string | null): McpServer {
+    const server = new McpServer({
+        name: 'e-zer0',
+        version: '1.0.0',
+    });
+
+    // ── Tool: list_connected_accounts ───────────────────
+    server.tool(
+        'list_connected_accounts',
+        'List all email accounts connected to this e-zer0 instance',
+        {},
+        async () => {
+            try {
+                const result = await listConnectedAccounts(env, clientId);
+                await logAudit(env.DB, clientId, clientName, 'list_connected_accounts', null, null, true);
+                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            } catch (e: any) {
+                await logAudit(env.DB, clientId, clientName, 'list_connected_accounts', null, null, false, e.message);
+                return { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    // ── Tool: read_recent_emails ────────────────────────
+    server.tool(
+        'read_recent_emails',
+        'Read recent emails from a connected email account',
+        {
+            account_id: z.number().describe('The ID of the email account to read from'),
+            count: z
+                .number()
+                .optional()
+                .default(10)
+                .describe('Number of recent emails to fetch (default: 10, max: 50)'),
+        },
+        async ({ account_id, count }) => {
+            try {
+                const clampedCount = Math.min(count, 50);
+                const result = await readRecentEmails(env, clientId, account_id, clampedCount);
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'read_recent_emails',
+                    `account:${account_id}`,
+                    `count:${clampedCount}`,
+                    true
+                );
+                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            } catch (e: any) {
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'read_recent_emails',
+                    `account:${account_id}`,
+                    null,
+                    false,
+                    e.message
+                );
+                return { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    // ── Tool: manage_email ──────────────────────────────
+    server.tool(
+        'manage_email',
+        'Perform an action on a specific email (archive, delete, mark as read/unread)',
+        {
+            account_id: z.number().describe('The ID of the email account'),
+            message_id: z.string().describe('The ID of the email message'),
+            action: z.enum(['archive', 'delete', 'mark_read', 'mark_unread']).describe('The action to perform'),
+        },
+        async ({ account_id, message_id, action }) => {
+            try {
+                const result = await manageEmail(env, clientId, account_id, message_id, action);
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'manage_email',
+                    `account:${account_id}:${message_id}`,
+                    `action:${action}`,
+                    true
+                );
+                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            } catch (e: any) {
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'manage_email',
+                    `account:${account_id}:${message_id}`,
+                    `action:${action}`,
+                    false,
+                    e.message
+                );
+                return { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    // ── Tool: organize_email (unified folder/label) ─────
+    server.tool(
+        'organize_email',
+        'Move an email to a folder or apply a label. Works the same across Gmail and Outlook — use folder names like "Archive", "Spam", "Promotions", "Updates", or any custom folder/label name. e-zer0 translates automatically between Gmail labels and Outlook folders.',
+        {
+            account_id: z.number().describe('The ID of the email account'),
+            message_id: z.string().describe('The ID of the email message'),
+            folder: z
+                .string()
+                .describe('Folder/label name (e.g. "Archive", "Spam", "Promotions", "Important", or a custom name)'),
+        },
+        async ({ account_id, message_id, folder }) => {
+            try {
+                const result = await organizeEmail(env, clientId, account_id, message_id, folder);
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'organize_email',
+                    `account:${account_id}:${message_id}`,
+                    `folder:${folder}`,
+                    true
+                );
+                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            } catch (e: any) {
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'organize_email',
+                    `account:${account_id}:${message_id}`,
+                    `folder:${folder}`,
+                    false,
+                    e.message
+                );
+                return { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    // ── Tool: list_folders ──────────────────────────────
+    server.tool(
+        'list_folders',
+        'List all available folders (Outlook) or labels (Gmail) for an email account. Returns a unified list.',
+        {
+            account_id: z.number().describe('The ID of the email account'),
+        },
+        async ({ account_id }) => {
+            try {
+                const result = await listEmailFolders(env, clientId, account_id);
+                await logAudit(env.DB, clientId, clientName, 'list_folders', `account:${account_id}`, null, true);
+                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            } catch (e: any) {
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'list_folders',
+                    `account:${account_id}`,
+                    null,
+                    false,
+                    e.message
+                );
+                return { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    // ── Tool: search_emails_semantic ────────────────────
+    server.tool(
+        'search_emails_semantic',
+        'Semantically search across indexed emails using natural language (e.g. "flight bookings", "invoices from Amazon")',
+        {
+            query: z.string().describe('Natural language search query'),
+            account_id: z.number().optional().describe('Optional: limit search to a specific account'),
+            top_k: z.number().optional().default(10).describe('Number of results to return (default: 10)'),
+        },
+        async ({ query, account_id, top_k }) => {
+            try {
+                const result = await searchEmailsSemantic(env, clientId, query, account_id, top_k);
+                await logAudit(env.DB, clientId, clientName, 'search_emails_semantic', null, `query:"${query}"`, true);
+                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            } catch (e: any) {
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'search_emails_semantic',
+                    null,
+                    `query:"${query}"`,
+                    false,
+                    e.message
+                );
+                return { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    // ── Tool: list_email_rules ──────────────────────────
+    server.tool(
+        'list_email_rules',
+        'List all automated email rules (Outlook) or filters (Gmail) for an account',
+        {
+            account_id: z.number().describe('The ID of the email account'),
+        },
+        async ({ account_id }) => {
+            try {
+                const result = await listEmailRules(env, clientId, account_id);
+                await logAudit(env.DB, clientId, clientName, 'list_email_rules', `account:${account_id}`, null, true);
+                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            } catch (e: any) {
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'list_email_rules',
+                    `account:${account_id}`,
+                    null,
+                    false,
+                    e.message
+                );
+                return { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    // ── Tool: create_email_rule ─────────────────────────
+    server.tool(
+        'create_email_rule',
+        'Create a new automated email rule (Outlook) or filter (Gmail)',
+        {
+            account_id: z.number().describe('The ID of the email account'),
+            name: z.string().describe('Name of the rule (used in Outlook, ignored in Gmail)'),
+            conditions: z
+                .object({
+                    from: z.array(z.string()).optional().describe('Apply to emails from these senders'),
+                    to: z.array(z.string()).optional().describe('Apply to emails sent to these addresses'),
+                    subject: z.array(z.string()).optional().describe('Apply to emails with these words in subject'),
+                    body: z.array(z.string()).optional().describe('Apply to emails with these words in body'),
+                })
+                .describe('Conditions that trigger the rule'),
+            actions: z
+                .object({
+                    markAsRead: z.boolean().optional().describe('Mark matching emails as read'),
+                    delete: z.boolean().optional().describe('Delete matching emails (move to trash)'),
+                    moveToFolder: z
+                        .string()
+                        .optional()
+                        .describe('Move matching emails to this folder/label ID (use list_folders to get IDs)'),
+                })
+                .describe('Actions to perform when conditions are met'),
+        },
+        async ({ account_id, name, conditions, actions }) => {
+            try {
+                const result = await createEmailRule(env, clientId, account_id, name, conditions, actions);
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'create_email_rule',
+                    `account:${account_id}`,
+                    `name:${name}`,
+                    true
+                );
+                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            } catch (e: any) {
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'create_email_rule',
+                    `account:${account_id}`,
+                    `name:${name}`,
+                    false,
+                    e.message
+                );
+                return { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    // ── Tool: update_email_rule ─────────────────────────
+    server.tool(
+        'update_email_rule',
+        'Update an existing email rule. Note: For Gmail, this deletes and recreates the rule entirely.',
+        {
+            account_id: z.number().describe('The ID of the email account'),
+            rule_id: z.string().describe('The ID of the rule to update'),
+            name: z.string().describe('New name of the rule'),
+            conditions: z
+                .object({
+                    from: z.array(z.string()).optional(),
+                    to: z.array(z.string()).optional(),
+                    subject: z.array(z.string()).optional(),
+                    body: z.array(z.string()).optional(),
+                })
+                .describe('Full new condition set for the rule'),
+            actions: z
+                .object({
+                    markAsRead: z.boolean().optional(),
+                    delete: z.boolean().optional(),
+                    moveToFolder: z.string().optional(),
+                })
+                .describe('Full new action set for the rule'),
+        },
+        async ({ account_id, rule_id, name, conditions, actions }) => {
+            try {
+                const result = await updateEmailRule(env, clientId, account_id, rule_id, name, conditions, actions);
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'update_email_rule',
+                    `account:${account_id}:${rule_id}`,
+                    null,
+                    true
+                );
+                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            } catch (e: any) {
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'update_email_rule',
+                    `account:${account_id}:${rule_id}`,
+                    null,
+                    false,
+                    e.message
+                );
+                return { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    // ── Tool: delete_email_rule ─────────────────────────
+    server.tool(
+        'delete_email_rule',
+        'Delete an email rule (Outlook) or filter (Gmail)',
+        {
+            account_id: z.number().describe('The ID of the email account'),
+            rule_id: z.string().describe('The ID of the rule to delete'),
+        },
+        async ({ account_id, rule_id }) => {
+            try {
+                const result = await deleteEmailRule(env, clientId, account_id, rule_id);
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'delete_email_rule',
+                    `account:${account_id}:${rule_id}`,
+                    null,
+                    true
+                );
+                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            } catch (e: any) {
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'delete_email_rule',
+                    `account:${account_id}:${rule_id}`,
+                    null,
+                    false,
+                    e.message
+                );
+                return { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
+    return server;
+}

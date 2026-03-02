@@ -1,0 +1,24 @@
+name = "e-zer0"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ── D1 Database ──────────────────────────────────────────
+[[d1_databases]]
+binding = "DB"
+database_name = "e-zer0-db"
+database_id = "local"                     # overwritten by setup-cf.js in CI
+migrations_dir = "migrations"
+
+# ── Vectorize (requires Cloudflare login — uncomment for remote dev/deploy) ──
+# [[vectorize]]
+# binding = "VECTOR_INDEX"
+# index_name = "e-zer0-index"
+
+# ── Workers AI (requires Cloudflare login — uncomment for remote dev/deploy) ──
+# [ai]
+# binding = "AI"
+
+# ── Cron Triggers (uncomment for remote deploy) ─────────
+# [triggers]
+# crons = ["0 * * * *"]
