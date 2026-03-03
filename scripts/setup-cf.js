@@ -4,7 +4,7 @@ import crypto from 'crypto';
 
 // This script handles two tasks:
 // 1. LOCAL: Generate ENCRYPTION_KEY + JWT_SECRET into .dev.vars (always runs)
-// 2. REMOTE: Provision Cloudflare resources (D1, Vectorize, KV) — only when authenticated
+// 2. REMOTE: Provision Cloudflare resources (D1, Vectorize, KV, Turnstile) — only when authenticated
 //
 // Usage:
 //   npm run setup-cf              # Generates local keys; skips remote if unauthenticated
@@ -117,6 +117,9 @@ main = "src/index.ts"
 compatibility_date = "2026-03-01"
 compatibility_flags = ["nodejs_compat"]
 
+[observability]
+enabled = true
+
 [[d1_databases]]
 binding = "DB"
 database_name = "${instanceName}-db"
@@ -134,7 +137,7 @@ id = "${kvId}"
     fs.writeFileSync('wrangler.toml', toml.trim());
     console.log('✅ wrangler.toml generated with remote resource IDs.');
 
-    // Push secrets to Cloudflare
+    // Push encryption/JWT secrets to Cloudflare
     try {
         console.log('Pushing secrets to Cloudflare...');
         execSync(`npx wrangler secret put ENCRYPTION_KEY`, { input: encryptionKey, stdio: ['pipe', 'ignore', 'ignore'] });
@@ -142,6 +145,71 @@ id = "${kvId}"
         console.log('✅ Secrets pushed to Cloudflare.');
     } catch (e) {
         console.log('⚠️  Could not push secrets to Cloudflare (non-fatal).');
+    }
+
+    // ── Turnstile (bot protection) ────────────────────────────────────────
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+    if (accountId) {
+        console.log(`Checking/Creating Turnstile site: ${instanceName}...`);
+        try {
+            const cfHeaders = {
+                Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
+                'Content-Type': 'application/json',
+            };
+
+            // List existing widgets to find one matching this instance
+            const listRes = await fetch(
+                `https://api.cloudflare.com/client/v4/accounts/${accountId}/challenges/widgets`,
+                { headers: cfHeaders }
+            );
+            const listData = await listRes.json();
+            const existing = (listData.result ?? []).find((w) => w.name === instanceName);
+
+            let sitekey, secret;
+            if (existing) {
+                // Secret is included in the individual GET response
+                const getRes = await fetch(
+                    `https://api.cloudflare.com/client/v4/accounts/${accountId}/challenges/widgets/${existing.sitekey}`,
+                    { headers: cfHeaders }
+                );
+                const getData = await getRes.json();
+                sitekey = getData.result?.sitekey;
+                secret = getData.result?.secret;
+                console.log('   Found existing Turnstile site.');
+            } else {
+                const createRes = await fetch(
+                    `https://api.cloudflare.com/client/v4/accounts/${accountId}/challenges/widgets`,
+                    {
+                        method: 'POST',
+                        headers: cfHeaders,
+                        body: JSON.stringify({
+                            name: instanceName,
+                            domains: [],
+                            mode: 'managed',
+                            bot_fight_mode: false,
+                            offlabel: false,
+                            region: 'world',
+                        }),
+                    }
+                );
+                const createData = await createRes.json();
+                sitekey = createData.result?.sitekey;
+                secret = createData.result?.secret;
+                console.log('   Created new Turnstile site.');
+            }
+
+            if (sitekey && secret) {
+                execSync(`npx wrangler secret put TURNSTILE_SITE_KEY`, { input: sitekey, stdio: ['pipe', 'ignore', 'ignore'] });
+                execSync(`npx wrangler secret put TURNSTILE_SECRET_KEY`, { input: secret, stdio: ['pipe', 'ignore', 'ignore'] });
+                console.log('✅ Turnstile site key and secret key pushed to Cloudflare.');
+            } else {
+                console.log('⚠️  Could not retrieve Turnstile keys — check that your API token has Account | Turnstile | Edit permission.');
+            }
+        } catch (e) {
+            console.log('⚠️  Turnstile setup failed (non-fatal):', e.message);
+        }
+    } else {
+        console.log('ℹ️  CLOUDFLARE_ACCOUNT_ID not set — skipping Turnstile provisioning.');
     }
 
     console.log('');

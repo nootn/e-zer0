@@ -16,6 +16,7 @@ import mcpRoutes from './routes/mcp';
 
 import { csrf } from 'hono/csrf';
 import { secureHeaders } from 'hono/secure-headers';
+import { HTTPException } from 'hono/http-exception';
 
 const app = new Hono<{ Bindings: Env; Variables: { userId: number; username: string } }>();
 
@@ -57,6 +58,20 @@ app.route('/mcp', mcpRoutes);
 // Root redirect
 app.get('/', (c) => c.redirect('/dashboard'));
 
+// Global error handler — logs to Cloudflare Workers Logs (visible in dashboard)
+app.onError((err, c) => {
+    if (err instanceof HTTPException) {
+        // 4xx are expected client errors (CSRF, auth, validation) — don't pollute error logs
+        if (err.status >= 500) {
+            console.error(`[${c.req.method}] ${new URL(c.req.url).pathname} — HTTP ${err.status}: ${err.message}`);
+        }
+        return err.getResponse();
+    }
+    // Unexpected errors — always log with stack trace
+    console.error(`[${c.req.method}] ${new URL(c.req.url).pathname} — ${err.message}`, err.stack);
+    return c.text('Internal Server Error', 500);
+});
+
 // Logout
 app.post('/logout', async (c) => {
     const clearCookie = await destroySession(c.env.DB, c.req.header('Cookie'));
@@ -69,7 +84,12 @@ app.post('/logout', async (c) => {
     });
 });
 
-// Favicon (prevent 404)
+// Robots.txt — prevent search indexing of this self-hosted app
+app.get('/robots.txt', (c) => {
+    return c.text('User-agent: *\nDisallow: /\n', 200, { 'Content-Type': 'text/plain' });
+});
+
+// Favicon — handled via <link rel="icon"> in layout; suppress 404 log noise
 app.get('/favicon.ico', (c) => {
     return new Response(null, { status: 204 });
 });

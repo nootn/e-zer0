@@ -4,12 +4,14 @@ import type { Env, AdminUser } from '../types';
 import { Layout, Alert } from '../views/layout';
 import { generateSalt, hashPassword } from '../lib/crypto';
 import { createSession } from '../lib/session';
+import { verifyTurnstile } from '../lib/turnstile';
 
 const setup = new Hono<{ Bindings: Env }>();
 
 setup.get('/', async (c) => {
+    const siteKey = c.env.TURNSTILE_SITE_KEY;
     return c.html(
-        <Layout title="Initial Setup">
+        <Layout title="Initial Setup" turnstileSiteKey={siteKey}>
             {(!c.env.ENCRYPTION_KEY || !c.env.JWT_SECRET) && (
                 <Alert type="error">
                     <strong>Critical Security Warning:</strong> Deployment missing root keys. Please ensure
@@ -66,6 +68,11 @@ setup.get('/', async (c) => {
                             placeholder="Re-enter password"
                         />
                     </div>
+                    {siteKey && (
+                        <div class="form-group" style="display:flex; justify-content:center;">
+                            <div class="cf-turnstile" data-sitekey={siteKey} data-theme="dark"></div>
+                        </div>
+                    )}
                     <button type="submit" class="btn btn-primary btn-full">
                         Create Admin Account
                     </button>
@@ -80,6 +87,26 @@ setup.post('/', async (c) => {
     const username = form.get('username')?.toString().trim();
     const password = form.get('password')?.toString();
     const confirm = form.get('confirm')?.toString();
+
+    // Turnstile verification (skipped if not configured — local dev)
+    if (c.env.TURNSTILE_SECRET_KEY) {
+        const token = form.get('cf-turnstile-response')?.toString() ?? '';
+        const ip = c.req.header('CF-Connecting-IP');
+        const ok = await verifyTurnstile(c.env.TURNSTILE_SECRET_KEY, token, ip);
+        if (!ok) {
+            return c.html(
+                <Layout title="Initial Setup">
+                    <Alert type="error">Bot check failed. Please try again.</Alert>
+                    <div class="card">
+                        <a href="/setup" class="btn btn-ghost btn-full">
+                            Try Again
+                        </a>
+                    </div>
+                </Layout>,
+                400
+            );
+        }
+    }
 
     // Validate
     if (!username || !password || !confirm) {

@@ -7,9 +7,10 @@ interface LayoutProps {
     children: any;
     username?: string;
     activeNav?: string;
+    turnstileSiteKey?: string;
 }
 
-export const Layout: FC<LayoutProps> = ({ title, children, username, activeNav }) => {
+export const Layout: FC<LayoutProps> = ({ title, children, username, activeNav, turnstileSiteKey }) => {
     return (
         <html lang="en">
             <head>
@@ -17,6 +18,13 @@ export const Layout: FC<LayoutProps> = ({ title, children, username, activeNav }
                 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
                 <title>{title} — e-zer0</title>
                 <meta name="description" content="AI-Native Inbox Manager — secure MCP bridge to your email" />
+                <meta name="robots" content="noindex, nofollow" />
+                <link
+                    rel="icon"
+                    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>"
+                />
+                {turnstileSiteKey &&
+                    html`<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>`}
                 {html`
                     <link rel="preconnect" href="https://fonts.googleapis.com" />
                     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

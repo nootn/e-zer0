@@ -15,6 +15,10 @@ export interface Env {
 
     // Rate Limiting KV
     RATE_LIMITER: KVNamespace;
+
+    // Cloudflare Turnstile (optional — omit to disable bot protection in local dev)
+    TURNSTILE_SITE_KEY?: string;
+    TURNSTILE_SECRET_KEY?: string;
 }
 
 // Database row types

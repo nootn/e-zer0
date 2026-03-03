@@ -3,6 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2026-03-01"
 compatibility_flags = ["nodejs_compat"]
 
+# ── Observability ─────────────────────────────────────────
+# Enables Workers Logs — view in Cloudflare Dashboard → Workers & Pages → your worker → Logs
+[observability]
+enabled = true
+
 # ── D1 Database ──────────────────────────────────────────
 [[d1_databases]]
 binding = "DB"

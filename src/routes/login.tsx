@@ -5,13 +5,15 @@ import { Layout, Alert } from '../views/layout';
 import { verifyPassword } from '../lib/crypto';
 import { createSession } from '../lib/session';
 import { checkRateLimit, incrementRateLimit, clearRateLimit } from '../lib/rate-limit';
+import { verifyTurnstile } from '../lib/turnstile';
 
 const login = new Hono<{ Bindings: Env }>();
 
 login.get('/', async (c) => {
     const error = c.req.query('error');
+    const siteKey = c.env.TURNSTILE_SITE_KEY;
     return c.html(
-        <Layout title="Login">
+        <Layout title="Login" turnstileSiteKey={siteKey}>
             {error && <Alert type="error">{decodeURIComponent(error)}</Alert>}
             <div class="card">
                 <h2 style="font-size:18px; font-weight:600; margin-bottom:6px;">Welcome Back</h2>
@@ -45,6 +47,11 @@ login.get('/', async (c) => {
                             autocomplete="current-password"
                         />
                     </div>
+                    {siteKey && (
+                        <div class="form-group" style="display:flex; justify-content:center;">
+                            <div class="cf-turnstile" data-sitekey={siteKey} data-theme="dark"></div>
+                        </div>
+                    )}
                     <button type="submit" class="btn btn-primary btn-full">
                         Sign In
                     </button>
@@ -61,6 +68,16 @@ login.post('/', async (c) => {
 
     if (!username || !password) {
         return c.redirect('/login?error=' + encodeURIComponent('All fields are required.'));
+    }
+
+    // Turnstile verification (skipped if not configured — local dev)
+    if (c.env.TURNSTILE_SECRET_KEY) {
+        const token = form.get('cf-turnstile-response')?.toString() ?? '';
+        const ip = c.req.header('CF-Connecting-IP');
+        const ok = await verifyTurnstile(c.env.TURNSTILE_SECRET_KEY, token, ip);
+        if (!ok) {
+            return c.redirect('/login?error=' + encodeURIComponent('Bot check failed. Please try again.'));
+        }
     }
 
     if (username.length > 255) {
