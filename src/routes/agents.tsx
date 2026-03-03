@@ -191,7 +191,6 @@ agents.get('/', async (c) => {
                                                             method="post"
                                                             action={`/agents/${client.id}/revoke`}
                                                             style="display:inline;"
-                                                            onsubmit="return confirm('Revoke this agent? It will no longer be able to access e-zer0.')"
                                                         >
                                                             <button type="submit" class="btn btn-danger btn-sm">
                                                                 Revoke
@@ -422,7 +421,6 @@ agents.post('/create', async (c) => {
                                                             method="post"
                                                             action={`/agents/${client.id}/revoke`}
                                                             style="display:inline;"
-                                                            onsubmit="return confirm('Revoke this agent? It will no longer be able to access e-zer0.')"
                                                         >
                                                             <button type="submit" class="btn btn-danger btn-sm">
                                                                 Revoke

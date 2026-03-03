@@ -93,7 +93,6 @@ accounts.get('/', async (c) => {
                                                 method="post"
                                                 action={`/accounts/${account.id}/delete`}
                                                 style="display:inline;"
-                                                onsubmit="return confirm('Are you sure you want to disconnect this account?')"
                                             >
                                                 <button type="submit" class="btn btn-danger btn-sm">
                                                     Disconnect
