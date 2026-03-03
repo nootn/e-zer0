@@ -80,6 +80,7 @@ You do not need to use the command line to deploy e-zer0.
     - Under **Permissions**, add the following:
         - `Account` \| `D1` \| `Edit`
         - `Account` \| `Vectorize` \| `Edit`
+        - `Account` \| `Workers KV Storage` \| `Edit`
         - `Account` \| `Workers Scripts` \| `Edit`
     - Find your **Account ID** in the Cloudflare URL or dashboard sidebar.
 3. In your forked GitHub repository, go to **Settings > Secrets and variables > Actions** and add the following **Repository Secrets**:

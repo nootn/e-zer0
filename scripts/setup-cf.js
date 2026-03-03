@@ -114,7 +114,7 @@ try {
     const toml = `
 name = "${instanceName}"
 main = "src/index.ts"
-compatibility_date = "2024-03-20"
+compatibility_date = "2026-03-01"
 compatibility_flags = ["nodejs_compat"]
 
 [[d1_databases]]
