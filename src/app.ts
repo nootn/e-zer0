@@ -67,6 +67,7 @@ app.get('/.well-known/oauth-authorization-server', (c) => {
         response_types_supported: ['code'],
         grant_types_supported: ['authorization_code', 'client_credentials'],
         code_challenge_methods_supported: ['S256'],
+        logo_uri: `${baseUrl}/logo.svg`,
     });
 });
 
@@ -123,6 +124,18 @@ app.get('/robots.txt', (c) => {
 // Favicon — handled via <link rel="icon"> in layout; suppress 404 log noise
 app.get('/favicon.ico', (c) => {
     return new Response(null, { status: 204 });
+});
+
+// Logo endpoint for OAuth metadata and MCP connectors
+app.get('/logo.svg', (c) => {
+    return c.text(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">⚡</text></svg>`,
+        200,
+        {
+            'Content-Type': 'image/svg+xml',
+            'Cache-Control': 'public, max-age=86400',
+        }
+    );
 });
 
 export default app;

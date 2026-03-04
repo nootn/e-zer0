@@ -227,6 +227,37 @@ const handleMcpConnection = async (c: Context<{ Bindings: Env }>) => {
 
     await server.connect(transport);
 
+    try {
+        const reqClone = c.req.raw.clone();
+        if (reqClone.method === 'POST') {
+            const bodyText = await reqClone.text();
+            if (bodyText) {
+                const body = JSON.parse(bodyText);
+                const rpcId = body.id || (Array.isArray(body) ? body.map((b: any) => b.id).join(',') : 'unknown');
+                const rpcMethod =
+                    body.method || (Array.isArray(body) ? body.map((b: any) => b.method).join(',') : 'unknown');
+
+                const cfRay = c.req.header('cf-ray') || 'unknown';
+                const traceparent = c.req.header('traceparent') || 'unknown';
+
+                console.log(
+                    JSON.stringify({
+                        level: 'info',
+                        message: `MCP Request: ${rpcMethod}`,
+                        client_id: clientId,
+                        client_name: clientName,
+                        mcp_request_id: rpcId,
+                        mcp_method: rpcMethod,
+                        cf_ray: cfRay,
+                        traceparent: traceparent,
+                    })
+                );
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to parse MCP request body for logging', e);
+    }
+
     // Hand off the Web Standard Request to the transport
     return await transport.handleRequest(c.req.raw as Request);
 };

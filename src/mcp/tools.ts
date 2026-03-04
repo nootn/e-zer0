@@ -77,8 +77,24 @@ async function getAccountToken(
     if (!account) throw new Error(`Account not found or access denied`);
     if (!account.encrypted_access_token) throw new Error(`Account not found or access denied`);
 
-    const accessToken = await decrypt(account.encrypted_access_token, encryptionKey);
-    return { account, accessToken };
+    try {
+        const accessToken = await decrypt(account.encrypted_access_token, encryptionKey);
+        return { account, accessToken };
+    } catch (err: any) {
+        console.error(`[DEBUG] getAccountToken decryption error: ${err.message}`, err);
+
+        // Handle invalid key / token corruption edge case gracefully
+        if (err.message?.includes('Decryption failed') || err.message?.includes('operation-specific reason')) {
+            await db
+                .prepare("UPDATE email_accounts SET status = ?, updated_at = datetime('now') WHERE id = ?")
+                .bind('error', accountId)
+                .run();
+            throw new Error(
+                `Email account ${account.email_address} encryption keys are invalid (likely due to a local key rotation). Please reconnect this account in your e-zer0 settings.`
+            );
+        }
+        throw err;
+    }
 }
 
 // ── Tool: list_connected_accounts ───────────────────────

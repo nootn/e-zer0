@@ -10,6 +10,7 @@ const PUBLIC_PATHS = [
     '/.well-known/oauth-authorization-server',
     '/.well-known/oauth-protected-resource',
     '/.well-known/oauth-protected-resource/mcp/sse',
+    '/logo.svg',
 ];
 const MCP_PATHS = ['/mcp'];
 
