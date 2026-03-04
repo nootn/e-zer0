@@ -1,9 +1,9 @@
 // MCP endpoint routes: token issuance + Streamable HTTP transport
-import { Hono } from 'hono';
+import { Hono, Context } from 'hono';
 import type { Env, McpClient } from '../types';
 import { verifyPassword } from '../lib/crypto';
 import { createMcpServer } from '../mcp/server';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { checkRateLimit, incrementRateLimit, clearRateLimit } from '../lib/rate-limit';
 
 const mcp = new Hono<{ Bindings: Env }>();
@@ -193,7 +193,7 @@ mcp.post('/token', async (c) => {
 
 // ── MCP Streamable HTTP Endpoint ────────────────────────
 
-mcp.post('/', async (c) => {
+const handleMcpConnection = async (c: Context<{ Bindings: Env }>) => {
     // Verify JWT
     const authHeader = c.req.header('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
@@ -220,21 +220,20 @@ mcp.post('/', async (c) => {
     // Create a fresh MCP server for this request
     const server = createMcpServer(c.env, clientId, clientName);
 
-    // Use Streamable HTTP transport
-    const transport = new StreamableHTTPServerTransport({
+    // Use Web Standard Streamable HTTP transport natively supported in Cloudflare Workers
+    const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: undefined, // Stateless mode
     });
 
     await server.connect(transport);
 
-    // Handle the request
-    const body = await c.req.json();
-    await transport.handleRequest(c.req.raw, body, c.res as any);
+    // Hand off the Web Standard Request to the transport
+    return await transport.handleRequest(c.req.raw as Request);
+};
 
-    // The transport writes the response directly via c.res.
-    // If we reach here, return a fallback.
-    return c.json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' } });
-});
+mcp.post('/', handleMcpConnection);
+mcp.post('/sse', handleMcpConnection);
+mcp.get('/sse', handleMcpConnection);
 
 // ── Health check ────────────────────────────────────────
 mcp.get('/', async (c) => {
