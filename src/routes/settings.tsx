@@ -118,8 +118,8 @@ settings.get('/', async (c) => {
                                                 App name: <code style="color:var(--accent-hover);">e-zer0</code>
                                             </li>
                                             <li>
-                                                Add scopes: <strong>Gmail API</strong> → <code>gmail.readonly</code> +{' '}
-                                                <code>gmail.modify</code>
+                                                Add scopes: <strong>Gmail API</strong> →{' '}
+                                                <code>https://mail.google.com/</code>
                                             </li>
                                             <li>
                                                 Add your email as a <strong>test user</strong>
