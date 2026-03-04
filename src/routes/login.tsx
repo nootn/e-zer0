@@ -21,6 +21,7 @@ login.get('/', async (c) => {
                     Sign in to manage your e-zer0 instance.
                 </p>
                 <form method="post" action="/login">
+                    <input type="hidden" name="redirect_to" value={c.req.query('redirect_to') || ''} />
                     <div class="form-group">
                         <label class="form-label" for="username">
                             Username
@@ -116,10 +117,25 @@ login.post('/', async (c) => {
 
     const session = await createSession(c.env.DB, user.id);
 
+    const redirectTo = form.get('redirect_to')?.toString();
+    let targetLocation = '/dashboard';
+
+    if (redirectTo) {
+        try {
+            const url = new URL(redirectTo);
+            // Only allow same-origin redirects to prevent Open Redirect
+            if (url.origin === new URL(c.req.url).origin) {
+                targetLocation = url.pathname + url.search;
+            }
+        } catch (e) {
+            // Invalid URL, fallback to dashboard
+        }
+    }
+
     return new Response(null, {
         status: 302,
         headers: {
-            Location: '/dashboard',
+            Location: targetLocation,
             'Set-Cookie': session.cookie,
         },
     });

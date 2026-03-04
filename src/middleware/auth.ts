@@ -3,7 +3,14 @@ import type { Env } from '../types';
 import { validateSession } from '../lib/session';
 
 // Paths that don't require authentication
-const PUBLIC_PATHS = ['/setup', '/login', '/favicon.ico'];
+const PUBLIC_PATHS = [
+    '/setup',
+    '/login',
+    '/favicon.ico',
+    '/.well-known/oauth-authorization-server',
+    '/.well-known/oauth-protected-resource',
+    '/.well-known/oauth-protected-resource/mcp/sse',
+];
 const MCP_PATHS = ['/mcp'];
 
 export const authMiddleware = createMiddleware<{ Bindings: Env; Variables: { userId: number; username: string } }>(
@@ -41,7 +48,8 @@ export const authMiddleware = createMiddleware<{ Bindings: Env; Variables: { use
         // Validate session
         const session = await validateSession(c.env.DB, c.req.header('Cookie'));
         if (!session) {
-            return c.redirect('/login');
+            const redirectUrl = encodeURIComponent(c.req.url);
+            return c.redirect(`/login?redirect_to=${redirectUrl}`);
         }
 
         // Set user info on context

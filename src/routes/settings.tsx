@@ -57,41 +57,12 @@ settings.get('/', async (c) => {
                             <h3 style="font-size:14px; font-weight:600; color:var(--text-primary); margin-bottom:12px;">
                                 Setup Instructions
                             </h3>
-                            <ol style="font-size:13px; color:var(--text-secondary); line-height:1.8; padding-left:18px; margin:0;">
+                            <ul style="font-size:13px; color:var(--text-secondary); line-height:1.8; padding-left:18px; margin:0; list-style:disc;">
                                 <li>
-                                    Go to{' '}
-                                    <a
-                                        href="https://console.cloud.google.com/apis/credentials"
-                                        target="_blank"
-                                        style="color:var(--accent-hover);"
-                                    >
-                                        Google Cloud Console → Credentials
-                                    </a>
-                                </li>
-                                <li>Create a new project (or select an existing one)</li>
-                                <li>
-                                    Click <strong>"+ Create Credentials"</strong> → <strong>"OAuth client ID"</strong>
+                                    Enable the <strong>Gmail API</strong> in Google Cloud.
                                 </li>
                                 <li>
-                                    If prompted, configure the <strong>OAuth consent screen</strong>:
-                                    <ul style="list-style:disc; padding-left:16px; margin:4px 0;">
-                                        <li>
-                                            User type: <strong>External</strong>
-                                        </li>
-                                        <li>
-                                            App name: <code style="color:var(--accent-hover);">e-zer0</code>
-                                        </li>
-                                        <li>
-                                            Add scopes: <strong>Gmail API</strong> → <code>gmail.readonly</code> +{' '}
-                                            <code>gmail.modify</code>
-                                        </li>
-                                        <li>
-                                            Add your email as a <strong>test user</strong>
-                                        </li>
-                                    </ul>
-                                </li>
-                                <li>
-                                    Application type: <strong>"Web application"</strong>
+                                    Create an <strong>OAuth Client ID</strong> (Web application).
                                 </li>
                                 <li>
                                     Authorized redirect URI:
@@ -101,10 +72,70 @@ settings.get('/', async (c) => {
                                     </code>
                                 </li>
                                 <li>
-                                    Copy the <strong>Client ID</strong> and <strong>Client Secret</strong> and paste
-                                    them here →
+                                    In the <strong>OAuth consent screen</strong> settings, be sure to add your email
+                                    address under <strong>Test users</strong>.
                                 </li>
-                            </ol>
+                            </ul>
+
+                            <details style="margin-top:12px;">
+                                <summary style="font-size:13px; color:var(--text-primary); font-weight:500; cursor:pointer;">
+                                    📋 Show full step-by-step instructions
+                                </summary>
+                                <ol style="font-size:12px; color:var(--text-secondary); line-height:1.8; padding-left:18px; margin-top:8px;">
+                                    <li>
+                                        First, go to the{' '}
+                                        <a
+                                            href="https://console.cloud.google.com/apis/library/gmail.googleapis.com"
+                                            target="_blank"
+                                            style="color:var(--accent-hover);"
+                                        >
+                                            Gmail API Library page
+                                        </a>{' '}
+                                        and click <strong>Enable</strong>.
+                                    </li>
+                                    <li>
+                                        Go to{' '}
+                                        <a
+                                            href="https://console.cloud.google.com/apis/credentials"
+                                            target="_blank"
+                                            style="color:var(--accent-hover);"
+                                        >
+                                            Google Cloud Console → Credentials
+                                        </a>
+                                    </li>
+                                    <li>Create a new project (or select an existing one)</li>
+                                    <li>
+                                        Click <strong>"+ Create Credentials"</strong> →{' '}
+                                        <strong>"OAuth client ID"</strong>
+                                    </li>
+                                    <li>
+                                        If prompted, configure the <strong>OAuth consent screen</strong>:
+                                        <ul style="list-style:disc; padding-left:16px; margin:4px 0;">
+                                            <li>
+                                                User type: <strong>External</strong>
+                                            </li>
+                                            <li>
+                                                App name: <code style="color:var(--accent-hover);">e-zer0</code>
+                                            </li>
+                                            <li>
+                                                Add scopes: <strong>Gmail API</strong> → <code>gmail.readonly</code> +{' '}
+                                                <code>gmail.modify</code>
+                                            </li>
+                                            <li>
+                                                Add your email as a <strong>test user</strong>
+                                            </li>
+                                        </ul>
+                                    </li>
+                                    <li>
+                                        Application type: <strong>"Web application"</strong>
+                                    </li>
+                                    <li>Add the Authorized redirect URI above.</li>
+                                    <li>
+                                        Copy the <strong>Client ID</strong> and <strong>Client Secret</strong> and paste
+                                        them here →
+                                    </li>
+                                </ol>
+                            </details>
                             <p style="font-size:12px; color:var(--text-muted); margin-top:12px;">
                                 ⏱ Takes about 5 minutes. This is a one-time setup.
                             </p>

@@ -279,6 +279,8 @@ const css = `
   }
   .btn-primary { background: var(--accent); color: white; }
   .btn-primary:hover { background: var(--accent-hover); box-shadow: 0 4px 16px rgba(99,102,241,0.3); transform: translateY(-1px); }
+  .btn-secondary { background: var(--bg-card-hover); color: var(--text-primary); border: 1px solid var(--border); }
+  .btn-secondary:hover { background: rgba(255, 255, 255, 0.1); border-color: var(--text-muted); box-shadow: 0 4px 16px rgba(0,0,0,0.1); transform: translateY(-1px); }
   .btn-danger { background: var(--error); color: white; }
   .btn-danger:hover { background: #dc2626; }
   .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }

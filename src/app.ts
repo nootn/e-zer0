@@ -13,6 +13,7 @@ import auditRoutes from './routes/audit';
 import settingsRoutes from './routes/settings';
 import oauthRoutes from './routes/oauth-callback';
 import mcpRoutes from './routes/mcp';
+import authorizeRoutes from './routes/authorize';
 
 import { csrf } from 'hono/csrf';
 import { secureHeaders } from 'hono/secure-headers';
@@ -54,6 +55,36 @@ app.route('/audit', auditRoutes);
 app.route('/settings', settingsRoutes);
 app.route('/oauth', oauthRoutes);
 app.route('/mcp', mcpRoutes);
+app.route('/authorize', authorizeRoutes);
+
+// OAuth Metadata endpoints (RFC 8414 / RFC 10064)
+app.get('/.well-known/oauth-authorization-server', (c) => {
+    const baseUrl = new URL(c.req.url).origin;
+    return c.json({
+        issuer: baseUrl,
+        authorization_endpoint: `${baseUrl}/authorize`,
+        token_endpoint: `${baseUrl}/mcp/token`,
+        response_types_supported: ['code'],
+        grant_types_supported: ['authorization_code', 'client_credentials'],
+        code_challenge_methods_supported: ['S256'],
+    });
+});
+
+app.get('/.well-known/oauth-protected-resource', (c) => {
+    const baseUrl = new URL(c.req.url).origin;
+    return c.json({
+        resource: `${baseUrl}/mcp/sse`,
+        authorization_servers: [baseUrl],
+    });
+});
+
+app.get('/.well-known/oauth-protected-resource/mcp/sse', (c) => {
+    const baseUrl = new URL(c.req.url).origin;
+    return c.json({
+        resource: `${baseUrl}/mcp/sse`,
+        authorization_servers: [baseUrl],
+    });
+});
 
 // Root redirect
 app.get('/', (c) => c.redirect('/dashboard'));

@@ -20,6 +20,8 @@ agents.get('/', async (c) => {
     const message = c.req.query('message');
     const error = c.req.query('error');
 
+    const editId = c.req.query('edit');
+
     // Fetch clients
     const result = await c.env.DB.prepare('SELECT * FROM mcp_clients ORDER BY created_at DESC').all<McpClient>();
     const clients = result.results ?? [];
@@ -146,6 +148,67 @@ agents.get('/', async (c) => {
                                         const allowedAliases = accounts
                                             .filter((acc: any) => client.allowed_accounts?.includes(acc.id))
                                             .map((acc: any) => acc.alias);
+                                        const isEditing = editId === client.id.toString();
+
+                                        if (isEditing) {
+                                            return (
+                                                <tr>
+                                                    <td colspan={7} style="padding: 16px; background: var(--bg-hover);">
+                                                        <form
+                                                            method="post"
+                                                            action={`/agents/${client.id}/accounts`}
+                                                            style="display:flex; flex-direction:column; gap:12px;"
+                                                        >
+                                                            <div>
+                                                                <h4 style="margin:0 0 8px 0; font-size:14px;">
+                                                                    Editing Permissions for "{client.name}"
+                                                                </h4>
+                                                                <p style="color:var(--text-secondary); font-size:12px; margin:0 0 12px 0;">
+                                                                    Select the email accounts this agent can access.
+                                                                </p>
+                                                                {accounts.length > 0 ? (
+                                                                    <div style="display:flex; flex-direction:column; gap:6px; max-height:200px; overflow-y:auto; padding:8px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-body);">
+                                                                        {accounts.map((acc: any) => (
+                                                                            <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+                                                                                <input
+                                                                                    type="checkbox"
+                                                                                    name="account_ids"
+                                                                                    value={acc.id}
+                                                                                    checked={client.allowed_accounts?.includes(
+                                                                                        acc.id
+                                                                                    )}
+                                                                                />
+                                                                                <span>
+                                                                                    <strong>{acc.alias}</strong> (
+                                                                                    {acc.email_address})
+                                                                                </span>
+                                                                            </label>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div style="font-size:13px; color:var(--text-muted); font-style:italic;">
+                                                                        No active email accounts available.
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                            <div style="display:flex; gap:8px; justify-content:flex-end;">
+                                                                <a
+                                                                    href="/agents"
+                                                                    class="btn btn-secondary btn-sm"
+                                                                    style="text-decoration:none;"
+                                                                >
+                                                                    Cancel
+                                                                </a>
+                                                                <button type="submit" class="btn btn-primary btn-sm">
+                                                                    Save Changes
+                                                                </button>
+                                                            </div>
+                                                        </form>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        }
+
                                         return (
                                             <tr>
                                                 <td style="font-weight:500;">{client.name}</td>
@@ -187,15 +250,24 @@ agents.get('/', async (c) => {
                                                 </td>
                                                 <td>
                                                     {client.is_active ? (
-                                                        <form
-                                                            method="post"
-                                                            action={`/agents/${client.id}/revoke`}
-                                                            style="display:inline;"
-                                                        >
-                                                            <button type="submit" class="btn btn-danger btn-sm">
-                                                                Revoke
-                                                            </button>
-                                                        </form>
+                                                        <div style="display:flex; gap:8px; align-items:center;">
+                                                            <a
+                                                                href={`/agents?edit=${client.id}`}
+                                                                class="btn btn-primary btn-sm"
+                                                                style="text-decoration:none;"
+                                                            >
+                                                                Edit
+                                                            </a>
+                                                            <form
+                                                                method="post"
+                                                                action={`/agents/${client.id}/revoke`}
+                                                                style="margin:0;"
+                                                            >
+                                                                <button type="submit" class="btn btn-danger btn-sm">
+                                                                    Revoke
+                                                                </button>
+                                                            </form>
+                                                        </div>
                                                     ) : (
                                                         <span style="color:var(--text-muted); font-size:12px;">
                                                             Revoked
@@ -417,15 +489,17 @@ agents.post('/create', async (c) => {
                                                 </td>
                                                 <td>
                                                     {client.is_active ? (
-                                                        <form
-                                                            method="post"
-                                                            action={`/agents/${client.id}/revoke`}
-                                                            style="display:inline;"
-                                                        >
-                                                            <button type="submit" class="btn btn-danger btn-sm">
-                                                                Revoke
-                                                            </button>
-                                                        </form>
+                                                        <div style="display:flex; gap:8px; align-items:center;">
+                                                            <form
+                                                                method="post"
+                                                                action={`/agents/${client.id}/revoke`}
+                                                                style="margin:0;"
+                                                            >
+                                                                <button type="submit" class="btn btn-danger btn-sm">
+                                                                    Revoke
+                                                                </button>
+                                                            </form>
+                                                        </div>
                                                     ) : (
                                                         <span style="color:var(--text-muted); font-size:12px;">
                                                             Revoked
@@ -449,6 +523,38 @@ agents.post('/:id/revoke', async (c) => {
     const id = c.req.param('id');
     await c.env.DB.prepare('UPDATE mcp_clients SET is_active = 0 WHERE id = ?').bind(id).run();
     return c.redirect('/agents?message=' + encodeURIComponent('Agent revoked successfully.'));
+});
+
+agents.post('/:id/accounts', async (c) => {
+    const id = c.req.param('id');
+    const form = await c.req.formData();
+    const accountIds = form
+        .getAll('account_ids')
+        .map((id) => parseInt(id.toString(), 10))
+        .filter((id) => !isNaN(id));
+
+    // First, verify the agent exists and is active
+    const client = await c.env.DB.prepare('SELECT id, name FROM mcp_clients WHERE id = ? AND is_active = 1')
+        .bind(id)
+        .first();
+
+    if (!client) {
+        return c.redirect('/agents?error=' + encodeURIComponent('Agent not found or is revoked.'));
+    }
+
+    // Delete existing mappings
+    await c.env.DB.prepare('DELETE FROM mcp_client_accounts WHERE mcp_client_id = ?').bind(id).run();
+
+    // Insert new mappings
+    if (accountIds.length > 0) {
+        const stmt = c.env.DB.prepare(
+            'INSERT INTO mcp_client_accounts (mcp_client_id, email_account_id) VALUES (?, ?)'
+        );
+        const batch = accountIds.map((accountId) => stmt.bind(id, accountId));
+        await c.env.DB.batch(batch);
+    }
+
+    return c.redirect('/agents?message=' + encodeURIComponent(`Permissions updated for ${client.name}.`));
 });
 
 export default agents;

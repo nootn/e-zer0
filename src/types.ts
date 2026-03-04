@@ -70,6 +70,17 @@ export interface McpClientAccount {
     created_at: string;
 }
 
+export interface OauthAuthCode {
+    id: string; // The code itself
+    client_id: string;
+    redirect_uri: string;
+    code_challenge: string | null;
+    code_challenge_method: string | null;
+    created_at: string;
+    expires_at: string;
+    user_id: number;
+}
+
 export interface AuditLog {
     id: number;
     client_id: string;
