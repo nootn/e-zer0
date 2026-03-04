@@ -100,11 +100,20 @@ export async function searchOutlookMessages(accessToken: string, options: GetEma
         searchParts.push(`subject:"${options.subject}"`);
     }
     if (options.after) {
-        // KQL expects dates
-        searchParts.push(`received>="${options.after}"`);
+        let afterVal = options.after;
+        if (afterVal.includes('T')) {
+            const ts = new Date(afterVal);
+            if (!isNaN(ts.getTime())) afterVal = ts.toISOString();
+        }
+        searchParts.push(`received>="${afterVal}"`);
     }
     if (options.before) {
-        searchParts.push(`received<"${options.before}"`);
+        let beforeVal = options.before;
+        if (beforeVal.includes('T')) {
+            const ts = new Date(beforeVal);
+            if (!isNaN(ts.getTime())) beforeVal = ts.toISOString();
+        }
+        searchParts.push(`received<"${beforeVal}"`);
     }
 
     // Graph API queries

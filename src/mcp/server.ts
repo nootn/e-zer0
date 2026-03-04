@@ -90,7 +90,7 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
     // ── Tool: get_emails ────────────────────────────────
     server.tool(
         'get_emails',
-        'Advanced search and fetch of emails with filtering. This is generally preferred over read_recent_emails if you need specific folders or search terms. Outlook "other" inbox is supported by setting folder to "other".',
+        'Advanced search and fetch of emails with filtering. This is generally preferred over read_recent_emails if you need specific folders or search terms. Outlook "other" inbox is supported by setting folder to "other". IF the user requests emails by a relative date (e.g. "today", "yesterday") and you do NOT know their timezone, explicitly ask them for their timezone or location first so you can accurately determine the correct timezone offset and avoid defaulting to GMT.',
         {
             account_id: z.number().describe('The ID of the email account'),
             folder: z
@@ -106,11 +106,15 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
             after: z
                 .string()
                 .optional()
-                .describe('Only fetch emails received after this date (YYYY-MM-DD or ISO 8601)'),
+                .describe(
+                    "Only fetch emails received after this date. Use full ISO 8601 with timezone offset (e.g., '2026-03-05T00:00:00+10:00') for accurate local time processing (especially for 'today', 'yesterday' etc). YYYY-MM-DD fallback is allowed but defaults to UTC/GMT."
+                ),
             before: z
                 .string()
                 .optional()
-                .describe('Only fetch emails received before this date (YYYY-MM-DD or ISO 8601)'),
+                .describe(
+                    "Only fetch emails received before this date. Use full ISO 8601 with timezone offset (e.g., '2026-03-05T23:59:59+10:00') for accurate local time processing. YYYY-MM-DD fallback is allowed."
+                ),
             count: z.number().optional().default(10).describe('Max number of emails to return (max 50)'),
         },
         async ({ account_id, folder, is_read, from, subject, after, before, count }) => {

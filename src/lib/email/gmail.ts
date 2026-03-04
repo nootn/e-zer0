@@ -95,10 +95,20 @@ export async function searchGmailMessages(accessToken: string, options: GetEmail
         queryParts.push(`subject:(${options.subject})`);
     }
     if (options.after) {
-        queryParts.push(`after:${options.after}`);
+        let afterVal = options.after;
+        if (afterVal.includes('T')) {
+            const ts = new Date(afterVal);
+            if (!isNaN(ts.getTime())) afterVal = Math.floor(ts.getTime() / 1000).toString();
+        }
+        queryParts.push(`after:${afterVal}`);
     }
     if (options.before) {
-        queryParts.push(`before:${options.before}`);
+        let beforeVal = options.before;
+        if (beforeVal.includes('T')) {
+            const ts = new Date(beforeVal);
+            if (!isNaN(ts.getTime())) beforeVal = Math.floor(ts.getTime() / 1000).toString();
+        }
+        queryParts.push(`before:${beforeVal}`);
     }
 
     const q = queryParts.join(' ');
