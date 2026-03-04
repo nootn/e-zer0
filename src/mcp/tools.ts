@@ -181,6 +181,75 @@ export async function readRecentEmails(
     return { account_id: accountId, provider: account.provider, messages: sanitizedMessages };
 }
 
+// ── Tool: get_emails ────────────────────────────────────
+
+export interface GetEmailsOptions {
+    folder?: string;
+    is_read?: boolean;
+    from?: string;
+    subject?: string;
+    after?: string;
+    before?: string;
+    count: number;
+}
+
+export async function getEmails(
+    env: Env,
+    clientId: string,
+    accountId: number,
+    options: GetEmailsOptions
+): Promise<any> {
+    const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
+
+    let messages;
+    if (account.provider === 'google') {
+        const { searchGmailMessages } = await import('../lib/email/gmail');
+        messages = await searchGmailMessages(accessToken, options);
+    } else {
+        const { searchOutlookMessages } = await import('../lib/email/outlook');
+        messages = await searchOutlookMessages(accessToken, options);
+    }
+
+    // Index emails for semantic search (best-effort)
+    try {
+        for (const msg of messages) {
+            const text = `${msg.subject} ${msg.snippet || ''}`;
+            await indexEmail(env.VECTOR_INDEX, env.AI, account.id, msg.id, text);
+        }
+    } catch (e) {
+        // Vector indexing is best-effort — don't fail the tool
+        console.error('Vector indexing error:', e);
+    }
+
+    // Sanitize email content before returning (PII redaction + prompt injection detection)
+    const sanitizedMessages = messages.map((msg: any) => {
+        const subjectResult = sanitizeEmailContent(msg.subject || '');
+        const snippetResult = sanitizeEmailContent(msg.snippet || '');
+        const bodyResult = msg.body ? sanitizeEmailContent(msg.body) : null;
+        return {
+            ...msg,
+            subject: subjectResult.sanitizedText,
+            snippet: snippetResult.sanitizedText,
+            body: bodyResult?.sanitizedText ?? msg.body,
+            _security: {
+                risk_score: Math.max(subjectResult.riskScore, snippetResult.riskScore, bodyResult?.riskScore ?? 0),
+                redactions: [
+                    ...subjectResult.redactions,
+                    ...snippetResult.redactions,
+                    ...(bodyResult?.redactions ?? []),
+                ],
+                injection_warnings: [
+                    ...subjectResult.injectionWarnings,
+                    ...snippetResult.injectionWarnings,
+                    ...(bodyResult?.injectionWarnings ?? []),
+                ],
+            },
+        };
+    });
+
+    return { account_id: accountId, provider: account.provider, messages: sanitizedMessages };
+}
+
 // ── Tool: manage_email ──────────────────────────────────
 
 export async function manageEmail(

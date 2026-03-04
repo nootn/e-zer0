@@ -129,6 +129,9 @@ database_id = "${dbId}"
 binding = "VECTOR_INDEX"
 index_name = "${instanceName}-index"
 
+[ai]
+binding = "AI"
+
 [[kv_namespaces]]
 binding = "RATE_LIMITER"
 id = "${kvId}"

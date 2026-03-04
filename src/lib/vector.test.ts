@@ -52,7 +52,11 @@ describe('indexEmail', () => {
         expect(mockIndex.upsert).toHaveBeenCalledWith([
             expect.objectContaining({
                 id: '42:msg-abc',
-                metadata: { account_id: 42, message_id: 'msg-abc' },
+                metadata: expect.objectContaining({
+                    account_id: 42,
+                    message_id: 'msg-abc',
+                    indexed_at: expect.any(Number),
+                }),
             }),
         ]);
     });

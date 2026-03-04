@@ -68,6 +68,67 @@ export async function listGmailMessages(
     return messages;
 }
 
+import type { GetEmailsOptions } from '../../mcp/tools';
+
+export async function searchGmailMessages(accessToken: string, options: GetEmailsOptions): Promise<EmailMessage[]> {
+    const queryParts: string[] = [];
+
+    // Folder mapping
+    const folder = (options.folder || 'inbox').toLowerCase();
+    if (folder !== 'all' && folder !== 'any') {
+        // Handle common custom names that might be categories
+        const isCategory = ['promotions', 'social', 'updates', 'forums'].includes(folder);
+        if (isCategory) {
+            queryParts.push(`category:${folder}`);
+        } else {
+            queryParts.push(`label:${folder}`);
+        }
+    }
+
+    if (options.is_read !== undefined) {
+        queryParts.push(options.is_read ? 'is:read' : 'is:unread');
+    }
+    if (options.from) {
+        queryParts.push(`from:(${options.from})`);
+    }
+    if (options.subject) {
+        queryParts.push(`subject:(${options.subject})`);
+    }
+    if (options.after) {
+        queryParts.push(`after:${options.after}`);
+    }
+    if (options.before) {
+        queryParts.push(`before:${options.before}`);
+    }
+
+    const q = queryParts.join(' ');
+    // Always fetch INBOX if nothing else is specified and it's empty, but we already default folder to inbox
+
+    const list = await gmailFetch(accessToken, `/messages?maxResults=${options.count}&q=${encodeURIComponent(q)}`);
+
+    if (!list.messages || list.messages.length === 0) return [];
+
+    const messages: EmailMessage[] = [];
+    for (const msg of list.messages) {
+        const full = await gmailFetch(
+            accessToken,
+            `/messages/${msg.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Date`
+        );
+        messages.push({
+            id: full.id,
+            threadId: full.threadId,
+            subject: decodeHeader(full.payload.headers, 'Subject'),
+            from: decodeHeader(full.payload.headers, 'From'),
+            to: decodeHeader(full.payload.headers, 'To'),
+            date: decodeHeader(full.payload.headers, 'Date'),
+            snippet: full.snippet || '',
+            labels: full.labelIds || [],
+        });
+    }
+
+    return messages;
+}
+
 export async function getGmailMessage(accessToken: string, messageId: string): Promise<EmailMessage> {
     const full = await gmailFetch(accessToken, `/messages/${messageId}?format=full`);
     const headers = full.payload.headers;

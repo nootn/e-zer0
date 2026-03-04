@@ -15,12 +15,12 @@ database_name = "e-zer0-db"
 database_id = "local"                     # overwritten by setup-cf.js in CI
 migrations_dir = "migrations"
 
-# ── Vectorize (requires Cloudflare login — uncomment for remote dev/deploy) ──
-# [[vectorize]]
-# binding = "VECTOR_INDEX"
-# index_name = "e-zer0-index"
+# ── Vectorize (requires Cloudflare login — not available in local dev) ──────
+[[vectorize]]
+binding = "VECTOR_INDEX"
+index_name = "e-zer0-index"
 
-# ── Workers AI (requires Cloudflare login — uncomment for remote dev/deploy) ──
+# ── Workers AI — commented out for local dev: setup-cf.js injects this at deploy time ──
 # [ai]
 # binding = "AI"
 

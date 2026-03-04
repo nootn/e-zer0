@@ -29,6 +29,7 @@ export async function indexEmail(
             metadata: {
                 account_id: accountId,
                 message_id: messageId,
+                indexed_at: Math.floor(Date.now() / 1000), // Unix timestamp (seconds) for future purging
             },
         },
     ]);

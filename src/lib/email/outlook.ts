@@ -53,6 +53,96 @@ export async function listOutlookMessages(
     }));
 }
 
+import type { GetEmailsOptions } from '../../mcp/tools';
+
+export async function searchOutlookMessages(accessToken: string, options: GetEmailsOptions): Promise<EmailMessage[]> {
+    let folder = (options.folder || 'inbox').toLowerCase();
+
+    // Graph API well-known folder names
+    const FOLDER_MAP: Record<string, string> = {
+        archive: 'archive',
+        inbox: 'inbox',
+        spam: 'junkemail',
+        junk: 'junkemail',
+        trash: 'deleteditems',
+        deleted: 'deleteditems',
+        drafts: 'drafts',
+        sent: 'sentitems',
+    };
+
+    let apiPath = `/mailFolders/inbox/messages`;
+    let inferenceFilter = '';
+
+    // Handle "other" or "focused" inbox pseudo-folders
+    if (folder === 'other' || folder === 'focused') {
+        const classification = folder === 'other' ? 'other' : 'focused';
+        inferenceFilter = `inferenceClassification eq '${classification}'`;
+        // Keep path as inbox because Focused/Other is just a view on the Inbox
+    } else if (FOLDER_MAP[folder]) {
+        apiPath = `/mailFolders/${FOLDER_MAP[folder]}/messages`;
+    } else if (folder !== 'inbox' && folder !== 'all' && folder !== 'any') {
+        // Assume custom folder
+        const folders = await listOutlookFolders(accessToken);
+        const customFolder = folders.find((f) => f.name.toLowerCase() === folder);
+        if (customFolder) {
+            apiPath = `/mailFolders/${customFolder.id}/messages`;
+        }
+    }
+
+    const searchParts: string[] = [];
+    if (options.is_read !== undefined) {
+        searchParts.push(`isread:${options.is_read}`);
+    }
+    if (options.from) {
+        searchParts.push(`from:"${options.from}"`);
+    }
+    if (options.subject) {
+        searchParts.push(`subject:"${options.subject}"`);
+    }
+    if (options.after) {
+        // KQL expects dates
+        searchParts.push(`received>="${options.after}"`);
+    }
+    if (options.before) {
+        searchParts.push(`received<"${options.before}"`);
+    }
+
+    // Graph API queries
+    const queryParams: string[] = [`$top=${options.count}`];
+    queryParams.push(`$select=id,subject,from,toRecipients,receivedDateTime,bodyPreview,isRead`);
+
+    if (searchParts.length > 0) {
+        const q = searchParts.join(' AND ');
+        queryParams.push(`$search="${encodeURIComponent(q)}"`);
+    } else {
+        // Order by date if not searching
+        queryParams.push(`$orderby=receivedDateTime desc`);
+    }
+
+    if (inferenceFilter) {
+        // Note: You generally cannot combine $search and $filter on exchange queries the way you expect,
+        // but $filter is required for Focused/Other. If a text search is also requested, Graph API might reject the combination.
+        // As a workaround, we append the filter if there is no search, OR we use the $filter endpoint entirely if searching isn't used.
+        // Actually, $search limits what can be used with $filter. We will prefer $filter if possible.
+        // Because KQL (used in $search) doesn't support inferenceClassification natively, we must rely on $filter if 'other' is requested.
+        queryParams.push(`$filter=${encodeURIComponent(inferenceFilter)}`);
+    }
+
+    const fullPath = `${apiPath}?${queryParams.join('&')}`;
+
+    const data = await graphFetch(accessToken, fullPath);
+
+    return (data.value || []).map((msg: any) => ({
+        id: msg.id,
+        subject: msg.subject || '',
+        from: msg.from?.emailAddress?.address || '',
+        to: (msg.toRecipients || []).map((r: any) => r.emailAddress?.address).join(', '),
+        date: msg.receivedDateTime || '',
+        snippet: msg.bodyPreview || '',
+        isRead: msg.isRead,
+    }));
+}
+
 export async function getOutlookMessage(accessToken: string, messageId: string): Promise<EmailMessage> {
     const msg = await graphFetch(
         accessToken,

@@ -87,6 +87,63 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
         }
     );
 
+    // ── Tool: get_emails ────────────────────────────────
+    server.tool(
+        'get_emails',
+        'Advanced search and fetch of emails with filtering. This is generally preferred over read_recent_emails if you need specific folders or search terms. Outlook "other" inbox is supported by setting folder to "other".',
+        {
+            account_id: z.number().describe('The ID of the email account'),
+            folder: z
+                .string()
+                .optional()
+                .describe('Folder name or ID (e.g. "inbox", "archive", "other"). Defaults to "inbox".'),
+            is_read: z
+                .boolean()
+                .optional()
+                .describe('Filter by read status: true for read, false for unread, omit for both.'),
+            from: z.string().optional().describe('Search for emails from this sender'),
+            subject: z.string().optional().describe('Search for emails with this in the subject'),
+            after: z
+                .string()
+                .optional()
+                .describe('Only fetch emails received after this date (YYYY-MM-DD or ISO 8601)'),
+            before: z
+                .string()
+                .optional()
+                .describe('Only fetch emails received before this date (YYYY-MM-DD or ISO 8601)'),
+            count: z.number().optional().default(10).describe('Max number of emails to return (max 50)'),
+        },
+        async ({ account_id, folder, is_read, from, subject, after, before, count }) => {
+            try {
+                const { getEmails } = await import('./tools');
+                const clampedCount = Math.min(count, 50);
+                const result = await getEmails(env, clientId, account_id, {
+                    folder,
+                    is_read,
+                    from,
+                    subject,
+                    after,
+                    before,
+                    count: clampedCount,
+                });
+                await logAudit(env.DB, clientId, clientName, 'get_emails', `account:${account_id}`, null, true);
+                return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+            } catch (e: any) {
+                await logAudit(
+                    env.DB,
+                    clientId,
+                    clientName,
+                    'get_emails',
+                    `account:${account_id}`,
+                    null,
+                    false,
+                    e.message
+                );
+                return { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true };
+            }
+        }
+    );
+
     // ── Tool: manage_email ──────────────────────────────
     server.tool(
         'manage_email',
