@@ -84,6 +84,7 @@ You do not need to use the command line to deploy e-zer0.
         - `Account` \| `Vectorize` \| `Edit`
         - `Account` \| `Workers KV Storage` \| `Edit`
         - `Account` \| `Workers Scripts` \| `Edit`
+        - `Account` \| `Secrets Store` \| `Edit`
         - `Account` \| `Turnstile` \| `Edit`
     - Find your **Account ID** in the Cloudflare URL or dashboard sidebar.
 4. In your forked GitHub repository, go to **Settings > Secrets and variables > Actions** and add the following **Repository Secrets**:
@@ -105,7 +106,7 @@ e-zer0 protects the login and setup pages with [Cloudflare Turnstile](https://ww
 
 **No manual setup required.** The `Deploy e-zer0` workflow automatically creates a Turnstile site (named after your `INSTANCE_NAME`) and pushes the site key and secret key as Cloudflare Worker secrets. This requires the `Account | Turnstile | Edit` permission on your API token (listed in step 3 above).
 
-In local development, the Turnstile widget is not shown and the challenge is skipped entirely — no `.dev.vars` changes needed.
+In local development, the Turnstile widget is not shown and the challenge is skipped entirely.
 
 ## � Supported Email Providers
 

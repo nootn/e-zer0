@@ -144,13 +144,20 @@ id = "${kvId}"
     try {
         console.log('Checking for existing secrets in Cloudflare...');
 
-        let existingSecrets = [];
+        // Default to assuming critical secrets already exist — safer than overwriting with a new random key
+        // which would break all encrypted tokens stored in D1.
+        let existingSecrets = ['ENCRYPTION_KEY', 'JWT_SECRET'];
         try {
             const listOutput = execSync('npx wrangler secret list --json', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
             existingSecrets = JSON.parse(listOutput).map(s => s.name);
+            console.log('✅ Successfully listed existing Cloudflare secrets.');
         } catch (e) {
-            // If json parsing fails or command fails, assume no secrets exist
-            console.log('⚠️  Could not list existing secrets (you may not be authenticated). Proceeding to push...');
+            // If listing fails, assume critical secrets exist to avoid overwriting them with a new random key.
+            // This prevents accidentally invalidating all encrypted tokens in D1.
+            console.log('⚠️  Could not list existing secrets — assuming ENCRYPTION_KEY and JWT_SECRET already exist to be safe.');
+            console.log('   If this is a first-time setup, manually run:');
+            console.log('     echo <your-key> | npx wrangler secret put ENCRYPTION_KEY');
+            console.log('     echo <your-key> | npx wrangler secret put JWT_SECRET');
         }
 
         if (existingSecrets.includes('ENCRYPTION_KEY')) {
