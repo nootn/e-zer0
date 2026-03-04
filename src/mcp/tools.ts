@@ -125,14 +125,20 @@ export async function listConnectedAccounts(env: Env, clientId: string): Promise
 
 // ── Tool: read_recent_emails ────────────────────────────
 
-export async function readRecentEmails(env: Env, clientId: string, accountId: number, count = 10): Promise<any> {
+export async function readRecentEmails(
+    env: Env,
+    clientId: string,
+    accountId: number,
+    count = 10,
+    unreadOnly = false
+): Promise<any> {
     const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
 
     let messages;
     if (account.provider === 'google') {
-        messages = await listGmailMessages(accessToken, count);
+        messages = await listGmailMessages(accessToken, count, unreadOnly);
     } else {
-        messages = await listOutlookMessages(accessToken, count);
+        messages = await listOutlookMessages(accessToken, count, unreadOnly);
     }
 
     // Index emails for semantic search (best-effort)
@@ -377,7 +383,8 @@ export async function createEmailRule(
     accountId: number,
     name: string,
     conditions: any,
-    actions: any
+    actions: any,
+    applyToExisting: boolean = false
 ): Promise<any> {
     const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
 
@@ -399,6 +406,12 @@ export async function createEmailRule(
         if (actions.delete) actionObj.addLabelIds = ['TRASH'];
 
         const filter = await createGmailFilter(accessToken, criteria, actionObj);
+
+        if (applyToExisting) {
+            const { applyRuleToExistingGmail } = await import('../lib/email/gmail');
+            await applyRuleToExistingGmail(accessToken, conditions, actions);
+        }
+
         return { success: true, account_id: accountId, provider: 'google', rule: filter };
     } else {
         // Outlook maps fairly directly
@@ -415,6 +428,12 @@ export async function createEmailRule(
 
         // Microsoft requires a sequence number, default to 10 for new rules
         const rule = await createOutlookRule(accessToken, name, 10, outCond, outAct);
+
+        if (applyToExisting) {
+            const { applyRuleToExistingOutlook } = await import('../lib/email/outlook');
+            await applyRuleToExistingOutlook(accessToken, conditions, actions);
+        }
+
         return { success: true, account_id: accountId, provider: 'microsoft', rule };
     }
 }
@@ -427,7 +446,8 @@ export async function updateEmailRule(
     ruleId: string,
     name: string,
     conditions: any,
-    actions: any
+    actions: any,
+    applyToExisting: boolean = false
 ): Promise<any> {
     const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
 
@@ -435,7 +455,7 @@ export async function updateEmailRule(
         const { deleteGmailFilter } = await import('../lib/email/gmail');
         // Gmail doesn't support PATCH, must delete and recreate
         await deleteGmailFilter(accessToken, ruleId);
-        return await createEmailRule(env, clientId, accountId, name, conditions, actions);
+        return await createEmailRule(env, clientId, accountId, name, conditions, actions, applyToExisting);
     } else {
         const outCond: any = {};
         if (conditions.from) outCond.senderContains = conditions.from;
@@ -449,6 +469,12 @@ export async function updateEmailRule(
         if (actions.moveToFolder) outAct.moveToFolder = actions.moveToFolder;
 
         const rule = await updateOutlookRule(accessToken, ruleId, name, outCond, outAct);
+
+        if (applyToExisting) {
+            const { applyRuleToExistingOutlook } = await import('../lib/email/outlook');
+            await applyRuleToExistingOutlook(accessToken, conditions, actions);
+        }
+
         return { success: true, account_id: accountId, provider: 'microsoft', rule };
     }
 }

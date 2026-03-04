@@ -37,8 +37,13 @@ function decodeHeader(headers: any[], name: string): string {
     return h?.value || '';
 }
 
-export async function listGmailMessages(accessToken: string, maxResults = 10): Promise<EmailMessage[]> {
-    const list = await gmailFetch(accessToken, `/messages?maxResults=${maxResults}&labelIds=INBOX`);
+export async function listGmailMessages(
+    accessToken: string,
+    maxResults = 10,
+    unreadOnly = false
+): Promise<EmailMessage[]> {
+    const query = unreadOnly ? '&q=is:unread' : '';
+    const list = await gmailFetch(accessToken, `/messages?maxResults=${maxResults}&labelIds=INBOX${query}`);
 
     if (!list.messages || list.messages.length === 0) return [];
 
@@ -221,5 +226,63 @@ export async function createGmailFilter(
 export async function deleteGmailFilter(accessToken: string, filterId: string): Promise<void> {
     await gmailFetch(accessToken, `/settings/filters/${filterId}`, {
         method: 'DELETE',
+    });
+}
+
+export async function applyRuleToExistingGmail(
+    accessToken: string,
+    conditions: any,
+    actions: any,
+    maxResults = 500
+): Promise<void> {
+    // 1. Build search query
+    const queryParts: string[] = [];
+    if (conditions.from && conditions.from.length > 0) {
+        queryParts.push(`from:(${conditions.from.join(' OR ')})`);
+    }
+    if (conditions.to && conditions.to.length > 0) {
+        queryParts.push(`to:(${conditions.to.join(' OR ')})`);
+    }
+    if (conditions.subject && conditions.subject.length > 0) {
+        queryParts.push(`subject:(${conditions.subject.join(' OR ')})`);
+    }
+    if (conditions.body && conditions.body.length > 0) {
+        queryParts.push(`(${conditions.body.join(' OR ')})`);
+    }
+
+    const q = queryParts.join(' ');
+    if (!q) return;
+
+    // 2. Fetch messages
+    const listRes = await gmailFetch(accessToken, `/messages?q=${encodeURIComponent(q)}&maxResults=${maxResults}`);
+    if (!listRes.messages || listRes.messages.length === 0) return;
+
+    const messageIds = listRes.messages.map((m: any) => m.id);
+
+    // 3. Build action lists
+    const addLabelIds: string[] = [];
+    const removeLabelIds: string[] = [];
+
+    if (actions.markAsRead) {
+        removeLabelIds.push('UNREAD');
+    }
+    if (actions.moveToFolder) {
+        addLabelIds.push(actions.moveToFolder);
+        removeLabelIds.push('INBOX');
+    }
+    if (actions.delete) {
+        addLabelIds.push('TRASH');
+    }
+
+    if (addLabelIds.length === 0 && removeLabelIds.length === 0) return;
+
+    // 4. Batch modify
+    await gmailFetch(accessToken, '/messages/batchModify', {
+        method: 'POST',
+        body: JSON.stringify({
+            ids: messageIds,
+            addLabelIds,
+            removeLabelIds,
+        }),
     });
 }

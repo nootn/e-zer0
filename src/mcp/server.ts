@@ -55,11 +55,12 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
                 .optional()
                 .default(10)
                 .describe('Number of recent emails to fetch (default: 10, max: 50)'),
+            unread_only: z.boolean().optional().default(false).describe('Only fetch unread emails'),
         },
-        async ({ account_id, count }) => {
+        async ({ account_id, count, unread_only }) => {
             try {
                 const clampedCount = Math.min(count, 50);
-                const result = await readRecentEmails(env, clientId, account_id, clampedCount);
+                const result = await readRecentEmails(env, clientId, account_id, clampedCount, unread_only);
                 await logAudit(
                     env.DB,
                     clientId,
@@ -275,10 +276,23 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
                         .describe('Move matching emails to this folder/label ID (use list_folders to get IDs)'),
                 })
                 .describe('Actions to perform when conditions are met'),
+            applyToExisting: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe('Set to true to also apply this rule retroactively to existing matching emails in the inbox'),
         },
-        async ({ account_id, name, conditions, actions }) => {
+        async ({ account_id, name, conditions, actions, applyToExisting }) => {
             try {
-                const result = await createEmailRule(env, clientId, account_id, name, conditions, actions);
+                const result = await createEmailRule(
+                    env,
+                    clientId,
+                    account_id,
+                    name,
+                    conditions,
+                    actions,
+                    applyToExisting
+                );
                 await logAudit(
                     env.DB,
                     clientId,
@@ -328,10 +342,26 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
                     moveToFolder: z.string().optional(),
                 })
                 .describe('Full new action set for the rule'),
+            applyToExisting: z
+                .boolean()
+                .optional()
+                .default(false)
+                .describe(
+                    'Set to true to also apply this updated rule retroactively to existing matching emails in the inbox'
+                ),
         },
-        async ({ account_id, rule_id, name, conditions, actions }) => {
+        async ({ account_id, rule_id, name, conditions, actions, applyToExisting }) => {
             try {
-                const result = await updateEmailRule(env, clientId, account_id, rule_id, name, conditions, actions);
+                const result = await updateEmailRule(
+                    env,
+                    clientId,
+                    account_id,
+                    rule_id,
+                    name,
+                    conditions,
+                    actions,
+                    applyToExisting
+                );
                 await logAudit(
                     env.DB,
                     clientId,

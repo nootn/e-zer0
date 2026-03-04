@@ -31,10 +31,15 @@ async function graphFetch(accessToken: string, path: string, options?: RequestIn
     return res.json();
 }
 
-export async function listOutlookMessages(accessToken: string, maxResults = 10): Promise<EmailMessage[]> {
+export async function listOutlookMessages(
+    accessToken: string,
+    maxResults = 10,
+    unreadOnly = false
+): Promise<EmailMessage[]> {
+    const filter = unreadOnly ? '&$filter=isRead eq false' : '';
     const data = await graphFetch(
         accessToken,
-        `/mailFolders/Inbox/messages?$top=${maxResults}&$select=id,subject,from,toRecipients,receivedDateTime,bodyPreview,isRead&$orderby=receivedDateTime desc`
+        `/mailFolders/Inbox/messages?$top=${maxResults}${filter}&$select=id,subject,from,toRecipients,receivedDateTime,bodyPreview,isRead&$orderby=receivedDateTime desc`
     );
 
     return (data.value || []).map((msg: any) => ({
@@ -224,4 +229,50 @@ export async function deleteOutlookRule(accessToken: string, ruleId: string): Pr
     await graphFetch(accessToken, `/mailFolders/inbox/messageRules/${ruleId}`, {
         method: 'DELETE',
     });
+}
+
+export async function applyRuleToExistingOutlook(
+    accessToken: string,
+    conditions: any,
+    actions: any,
+    maxResults = 100
+): Promise<void> {
+    // 1. Build search query (KQL format for Graph API)
+    const queryParts: string[] = [];
+    if (conditions.from && conditions.from.length > 0) {
+        queryParts.push(`from:(${conditions.from.join(' OR ')})`);
+    }
+    if (conditions.to && conditions.to.length > 0) {
+        queryParts.push(`to:(${conditions.to.join(' OR ')})`);
+    }
+    if (conditions.subject && conditions.subject.length > 0) {
+        queryParts.push(`subject:(${conditions.subject.join(' OR ')})`);
+    }
+    if (conditions.body && conditions.body.length > 0) {
+        queryParts.push(`(${conditions.body.join(' OR ')})`);
+    }
+
+    const q = queryParts.join(' AND ');
+    if (!q) return;
+
+    // 2. Fetch messages
+    const data = await graphFetch(
+        accessToken,
+        `/mailFolders/Inbox/messages?$search="${encodeURIComponent(q)}"&$select=id&$top=${maxResults}`
+    );
+
+    if (!data.value || data.value.length === 0) return;
+
+    // 3. Iterate and apply actions
+    for (const msg of data.value) {
+        if (actions.markAsRead) {
+            await markOutlookMessageRead(accessToken, msg.id, true);
+        }
+        if (actions.moveToFolder) {
+            await moveOutlookMessage(accessToken, msg.id, actions.moveToFolder);
+        }
+        if (actions.delete) {
+            await deleteOutlookMessage(accessToken, msg.id);
+        }
+    }
 }

@@ -332,7 +332,7 @@ settings.post('/microsoft', async (c) => {
         }
         return c.redirect(
             '/settings?message=' +
-            encodeURIComponent('Microsoft credentials saved! You can now add Outlook/M365 accounts.')
+                encodeURIComponent('Microsoft credentials saved! You can now add Outlook/M365 accounts.')
         );
     } catch (err: any) {
         console.error('Settings Error (Microsoft):', err);
