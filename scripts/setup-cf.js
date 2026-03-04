@@ -139,10 +139,33 @@ id = "${kvId}"
 
     // Push encryption/JWT secrets to Cloudflare
     try {
-        console.log('Pushing secrets to Cloudflare...');
-        execSync(`npx wrangler secret put ENCRYPTION_KEY`, { input: encryptionKey, stdio: ['pipe', 'ignore', 'ignore'] });
-        execSync(`npx wrangler secret put JWT_SECRET`, { input: jwtSecret, stdio: ['pipe', 'ignore', 'ignore'] });
-        console.log('✅ Secrets pushed to Cloudflare.');
+        console.log('Checking for existing secrets in Cloudflare...');
+
+        let existingSecrets = [];
+        try {
+            const listOutput = execSync('npx wrangler secret list --json', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+            existingSecrets = JSON.parse(listOutput).map(s => s.name);
+        } catch (e) {
+            // If json parsing fails or command fails, assume no secrets exist
+            console.log('⚠️  Could not list existing secrets (you may not be authenticated). Proceeding to push...');
+        }
+
+        if (existingSecrets.includes('ENCRYPTION_KEY')) {
+            console.log('✅ ENCRYPTION_KEY already exists in Cloudflare. Skipping.');
+        } else {
+            console.log('Pushing ENCRYPTION_KEY to Cloudflare...');
+            execSync(`npx wrangler secret put ENCRYPTION_KEY`, { input: encryptionKey, stdio: ['pipe', 'ignore', 'ignore'] });
+            console.log('✅ ENCRYPTION_KEY pushed.');
+        }
+
+        if (existingSecrets.includes('JWT_SECRET')) {
+            console.log('✅ JWT_SECRET already exists in Cloudflare. Skipping.');
+        } else {
+            console.log('Pushing JWT_SECRET to Cloudflare...');
+            execSync(`npx wrangler secret put JWT_SECRET`, { input: jwtSecret, stdio: ['pipe', 'ignore', 'ignore'] });
+            console.log('✅ JWT_SECRET pushed.');
+        }
+
     } catch (e) {
         console.log('⚠️  Could not push secrets to Cloudflare (non-fatal).');
     }

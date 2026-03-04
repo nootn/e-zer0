@@ -73,12 +73,22 @@ oauth.get('/google/callback', async (c) => {
         const encryptedRefresh = await encrypt(tokens.refresh_token, c.env.ENCRYPTION_KEY!);
         const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 
-        await c.env.DB.prepare(
-            `INSERT INTO email_accounts (alias, email_address, provider, encrypted_access_token, encrypted_refresh_token, token_expires_at)
-         VALUES (?, ?, 'google', ?, ?, ?)`
+        const updateResult = await c.env.DB.prepare(
+            `UPDATE email_accounts 
+             SET alias = ?, encrypted_access_token = ?, encrypted_refresh_token = ?, token_expires_at = ?, status = 'active', updated_at = datetime('now')
+             WHERE email_address = ? AND provider = 'google'`
         )
-            .bind(email, email, encryptedAccess, encryptedRefresh, expiresAt)
+            .bind(email, encryptedAccess, encryptedRefresh, expiresAt, email)
             .run();
+
+        if (updateResult.meta.changes === 0) {
+            await c.env.DB.prepare(
+                `INSERT INTO email_accounts (alias, email_address, provider, encrypted_access_token, encrypted_refresh_token, token_expires_at)
+             VALUES (?, ?, 'google', ?, ?, ?)`
+            )
+                .bind(email, email, encryptedAccess, encryptedRefresh, expiresAt)
+                .run();
+        }
 
         return c.redirect('/accounts?message=' + encodeURIComponent(`Gmail account ${email} connected!`));
     } catch (err: any) {
@@ -145,12 +155,22 @@ oauth.get('/microsoft/callback', async (c) => {
         const encryptedRefresh = await encrypt(tokens.refresh_token, c.env.ENCRYPTION_KEY!);
         const expiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 
-        await c.env.DB.prepare(
-            `INSERT INTO email_accounts (alias, email_address, provider, encrypted_access_token, encrypted_refresh_token, token_expires_at)
-         VALUES (?, ?, 'microsoft', ?, ?, ?)`
+        const updateResult = await c.env.DB.prepare(
+            `UPDATE email_accounts 
+             SET alias = ?, encrypted_access_token = ?, encrypted_refresh_token = ?, token_expires_at = ?, status = 'active', updated_at = datetime('now')
+             WHERE email_address = ? AND provider = 'microsoft'`
         )
-            .bind(email, email, encryptedAccess, encryptedRefresh, expiresAt)
+            .bind(email, encryptedAccess, encryptedRefresh, expiresAt, email)
             .run();
+
+        if (updateResult.meta.changes === 0) {
+            await c.env.DB.prepare(
+                `INSERT INTO email_accounts (alias, email_address, provider, encrypted_access_token, encrypted_refresh_token, token_expires_at)
+             VALUES (?, ?, 'microsoft', ?, ?, ?)`
+            )
+                .bind(email, email, encryptedAccess, encryptedRefresh, expiresAt)
+                .run();
+        }
 
         return c.redirect('/accounts?message=' + encodeURIComponent(`Outlook account ${email} connected!`));
     } catch (err: any) {

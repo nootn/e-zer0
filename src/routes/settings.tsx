@@ -119,7 +119,8 @@ settings.get('/', async (c) => {
                                             </li>
                                             <li>
                                                 Add scopes: <strong>Gmail API</strong> →{' '}
-                                                <code>https://mail.google.com/</code>
+                                                <code>https://mail.google.com/</code> and{' '}
+                                                <code>https://www.googleapis.com/auth/gmail.settings.basic</code>
                                             </li>
                                             <li>
                                                 Add your email as a <strong>test user</strong>
@@ -331,7 +332,7 @@ settings.post('/microsoft', async (c) => {
         }
         return c.redirect(
             '/settings?message=' +
-                encodeURIComponent('Microsoft credentials saved! You can now add Outlook/M365 accounts.')
+            encodeURIComponent('Microsoft credentials saved! You can now add Outlook/M365 accounts.')
         );
     } catch (err: any) {
         console.error('Settings Error (Microsoft):', err);
