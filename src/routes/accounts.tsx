@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import type { Env, EmailAccount } from '../types';
 import { Layout, Card, Alert, EmptyState } from '../views/layout';
 import { hasSetting } from '../lib/settings';
+import { refreshAccountToken } from '../lib/oauth/refresh';
 
 const accounts = new Hono<{ Bindings: Env; Variables: { userId: number; username: string } }>();
 
@@ -91,6 +92,19 @@ accounts.get('/', async (c) => {
                                         <td>
                                             <form
                                                 method="post"
+                                                action={`/accounts/${account.id}/refresh`}
+                                                style="display:inline; margin-right: 8px;"
+                                            >
+                                                <button
+                                                    type="submit"
+                                                    class="btn btn-secondary btn-sm"
+                                                    title="Manually refresh the email access token"
+                                                >
+                                                    Refresh token
+                                                </button>
+                                            </form>
+                                            <form
+                                                method="post"
                                                 action={`/accounts/${account.id}/delete`}
                                                 style="display:inline;"
                                             >
@@ -114,6 +128,24 @@ accounts.post('/:id/delete', async (c) => {
     const id = c.req.param('id');
     await c.env.DB.prepare('DELETE FROM email_accounts WHERE id = ?').bind(id).run();
     return c.redirect('/accounts?message=' + encodeURIComponent('Account disconnected successfully.'));
+});
+
+accounts.post('/:id/refresh', async (c) => {
+    const id = parseInt(c.req.param('id'), 10);
+    const account = await c.env.DB.prepare('SELECT * FROM email_accounts WHERE id = ?').bind(id).first<EmailAccount>();
+    if (!account) {
+        return c.redirect('/accounts?error=' + encodeURIComponent('Account not found.'));
+    }
+
+    try {
+        await refreshAccountToken(c.env, account);
+        return c.redirect('/accounts?message=' + encodeURIComponent('Token refreshed successfully.'));
+    } catch (err: any) {
+        await c.env.DB.prepare(`UPDATE email_accounts SET status = 'error', updated_at = datetime('now') WHERE id = ?`)
+            .bind(id)
+            .run();
+        return c.redirect('/accounts?error=' + encodeURIComponent('Refresh failed: ' + err.message));
+    }
 });
 
 export default accounts;

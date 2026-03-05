@@ -135,6 +135,9 @@ binding = "AI"
 [[kv_namespaces]]
 binding = "RATE_LIMITER"
 id = "${kvId}"
+
+[triggers]
+crons = ["*/30 * * * *"]
 `;
 
     fs.writeFileSync('wrangler.toml', toml.trim());

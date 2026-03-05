@@ -16,6 +16,26 @@ import {
     deleteEmailRule,
 } from './tools';
 
+async function handleToolError(env: Env, accountId: number | undefined, e: any) {
+    if (
+        accountId &&
+        e.message &&
+        (e.message.includes('(401)') ||
+            e.message.includes('Unauthenticated') ||
+            e.message.includes('Invalid Authentication'))
+    ) {
+        try {
+            await env.DB.prepare(
+                "UPDATE email_accounts SET status = 'error', updated_at = datetime('now') WHERE id = ?"
+            )
+                .bind(accountId)
+                .run();
+        } catch (dbErr) {
+            console.error('Failed to update account status:', dbErr);
+        }
+    }
+}
+
 export function createMcpServer(env: Env, clientId: string, clientName: string | null): McpServer {
     const server = new McpServer({
         name: 'e-zer0',
@@ -72,6 +92,7 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
                 );
                 return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
             } catch (e: any) {
+                await handleToolError(env, account_id, e);
                 await logAudit(
                     env.DB,
                     clientId,
@@ -133,6 +154,7 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
                 await logAudit(env.DB, clientId, clientName, 'get_emails', `account:${account_id}`, null, true);
                 return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
             } catch (e: any) {
+                await handleToolError(env, account_id, e);
                 await logAudit(
                     env.DB,
                     clientId,
@@ -171,6 +193,7 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
                 );
                 return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
             } catch (e: any) {
+                await handleToolError(env, account_id, e);
                 await logAudit(
                     env.DB,
                     clientId,
@@ -211,6 +234,7 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
                 );
                 return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
             } catch (e: any) {
+                await handleToolError(env, account_id, e);
                 await logAudit(
                     env.DB,
                     clientId,
@@ -239,6 +263,7 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
                 await logAudit(env.DB, clientId, clientName, 'list_folders', `account:${account_id}`, null, true);
                 return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
             } catch (e: any) {
+                await handleToolError(env, account_id, e);
                 await logAudit(
                     env.DB,
                     clientId,
@@ -297,6 +322,7 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
                 await logAudit(env.DB, clientId, clientName, 'list_email_rules', `account:${account_id}`, null, true);
                 return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
             } catch (e: any) {
+                await handleToolError(env, account_id, e);
                 await logAudit(
                     env.DB,
                     clientId,
@@ -365,6 +391,7 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
                 );
                 return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
             } catch (e: any) {
+                await handleToolError(env, account_id, e);
                 await logAudit(
                     env.DB,
                     clientId,
@@ -434,6 +461,7 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
                 );
                 return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
             } catch (e: any) {
+                await handleToolError(env, account_id, e);
                 await logAudit(
                     env.DB,
                     clientId,
@@ -471,6 +499,7 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
                 );
                 return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
             } catch (e: any) {
+                await handleToolError(env, account_id, e);
                 await logAudit(
                     env.DB,
                     clientId,

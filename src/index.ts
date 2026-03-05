@@ -6,6 +6,7 @@ import { refreshGoogleToken } from './lib/oauth/google';
 import { refreshMicrosoftToken } from './lib/oauth/microsoft';
 import { getEncryptionKey } from './lib/keys';
 import { getOAuthCredentials } from './lib/settings';
+import { refreshAccountToken } from './lib/oauth/refresh';
 
 export default {
     // ── HTTP Handler ──────────────────────────────────────
@@ -33,51 +34,7 @@ export default {
 
         for (const account of accounts.results ?? []) {
             try {
-                const refreshToken = await decrypt(account.encrypted_refresh_token!, encryptionKey);
-
-                // Get OAuth credentials from D1 settings
-                const creds = await getOAuthCredentials(env.DB, account.provider, encryptionKey);
-                if (!creds) {
-                    console.error(`No OAuth credentials for ${account.provider} — skipping account ${account.id}`);
-                    continue;
-                }
-
-                let newAccessToken: string;
-                let expiresIn: number;
-                let newRefreshToken: string | undefined;
-
-                if (account.provider === 'google') {
-                    const result = await refreshGoogleToken(refreshToken, creds.clientId, creds.clientSecret);
-                    newAccessToken = result.access_token;
-                    expiresIn = result.expires_in;
-                } else {
-                    const result = await refreshMicrosoftToken(refreshToken, creds.clientId, creds.clientSecret);
-                    newAccessToken = result.access_token;
-                    expiresIn = result.expires_in;
-                    newRefreshToken = result.refresh_token; // Microsoft may rotate refresh tokens
-                }
-
-                const encryptedAccess = await encrypt(newAccessToken, encryptionKey);
-                const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
-
-                if (newRefreshToken) {
-                    const encryptedRefresh = await encrypt(newRefreshToken, encryptionKey);
-                    await env.DB.prepare(
-                        `UPDATE email_accounts
-               SET encrypted_access_token = ?, encrypted_refresh_token = ?, token_expires_at = ?, status = 'active', updated_at = datetime('now')
-               WHERE id = ?`
-                    )
-                        .bind(encryptedAccess, encryptedRefresh, expiresAt, account.id)
-                        .run();
-                } else {
-                    await env.DB.prepare(
-                        `UPDATE email_accounts
-               SET encrypted_access_token = ?, token_expires_at = ?, status = 'active', updated_at = datetime('now')
-               WHERE id = ?`
-                    )
-                        .bind(encryptedAccess, expiresAt, account.id)
-                        .run();
-                }
+                await refreshAccountToken(env, account);
 
                 console.log(`Refreshed token for account ${account.id} (${account.email_address})`);
             } catch (err: any) {
