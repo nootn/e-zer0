@@ -206,7 +206,7 @@ settings.get('/', async (c) => {
                                 <li>
                                     Supported account types:{' '}
                                     <strong style="color:var(--accent-hover);">
-                                        "Accounts in any organizational directory AND personal Microsoft accounts"
+                                        "Any Entra ID Tenant + Personal Microsoft accounts"
                                     </strong>
                                     <br />
                                     <span style="font-size:11px; color:var(--text-muted);">
@@ -233,11 +233,18 @@ settings.get('/', async (c) => {
                                     Copy the <strong>Value</strong> (not the Secret ID) — paste both here →
                                 </li>
                             </ol>
-                            <details style="margin-top:12px;">
-                                <summary style="font-size:12px; color:var(--text-muted); cursor:pointer;">
-                                    📋 Required API Permissions (usually auto-granted)
-                                </summary>
-                                <ul style="font-size:12px; color:var(--text-muted); padding-left:16px; margin-top:6px; line-height:1.6;">
+                            <div style="margin-top:14px; padding:12px; background:var(--bg-card); border-radius:6px; border:1px solid var(--border);">
+                                <p style="font-size:12px; font-weight:600; color:var(--text-primary); margin:0 0 8px 0;">
+                                    🔑 Required API Permissions
+                                </p>
+                                <p style="font-size:11px; color:var(--text-muted); margin:0 0 8px 0;">
+                                    In Azure Portal, go to{' '}
+                                    <strong>
+                                        API permissions → + Add a permission → Microsoft Graph → Delegated permissions
+                                    </strong>{' '}
+                                    and add:
+                                </p>
+                                <ul style="font-size:12px; color:var(--text-secondary); padding-left:16px; margin:0; line-height:1.8;">
                                     <li>
                                         <code>Mail.Read</code> — read email messages
                                     </li>
@@ -245,13 +252,18 @@ settings.get('/', async (c) => {
                                         <code>Mail.ReadWrite</code> — move, archive, delete emails
                                     </li>
                                     <li>
-                                        <code>User.Read</code> — get email address
+                                        <code style="color:var(--accent-hover);">MailboxSettings.ReadWrite</code>{' '}
+                                        <strong style="color:var(--accent-hover);">★</strong> — manage inbox rules
+                                        (list, create, update, delete)
                                     </li>
                                     <li>
-                                        <code>offline_access</code> — refresh tokens (auto-included)
+                                        <code>User.Read</code> — sign in &amp; get email address
+                                    </li>
+                                    <li>
+                                        <code>offline_access</code> — keep you signed in (auto-included)
                                     </li>
                                 </ul>
-                            </details>
+                            </div>
                             <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">
                                 ⏱ Takes about 5 minutes. This is a one-time setup.
                             </p>

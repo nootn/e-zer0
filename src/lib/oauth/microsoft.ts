@@ -6,6 +6,7 @@ const MS_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token
 const MS_SCOPES = [
     'https://graph.microsoft.com/Mail.Read',
     'https://graph.microsoft.com/Mail.ReadWrite',
+    'https://graph.microsoft.com/MailboxSettings.ReadWrite',
     'https://graph.microsoft.com/User.Read',
     'offline_access',
 ].join(' ');
