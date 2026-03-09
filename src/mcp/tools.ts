@@ -424,7 +424,7 @@ export async function listEmailFolders(env: Env, clientId: string, accountId: nu
             provider: 'microsoft',
             folders: folders.map((f) => ({
                 id: f.id,
-                name: f.name,
+                name: f.path || f.name,
                 type: 'folder' as const,
             })),
         };
@@ -458,7 +458,7 @@ export async function createEmailRule(
     const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
 
     if (account.provider === 'google') {
-        const { createGmailFilter } = await import('../lib/email/gmail');
+        const { createGmailFilter, resolveGmailLabelId } = await import('../lib/email/gmail');
         // Map unified conditions/actions to Gmail format
         const criteria: any = {};
         if (conditions.from) criteria.from = conditions.from.join(' OR ');
@@ -469,7 +469,7 @@ export async function createEmailRule(
         const actionObj: any = {};
         if (actions.markAsRead) actionObj.removeLabelIds = ['UNREAD'];
         if (actions.moveToFolder) {
-            actionObj.addLabelIds = [actions.moveToFolder];
+            actionObj.addLabelIds = [await resolveGmailLabelId(accessToken, actions.moveToFolder, true)];
             actionObj.removeLabelIds = [...(actionObj.removeLabelIds || []), 'INBOX'];
         }
         if (actions.delete) actionObj.addLabelIds = ['TRASH'];
@@ -478,11 +478,17 @@ export async function createEmailRule(
 
         if (applyToExisting) {
             const { applyRuleToExistingGmail } = await import('../lib/email/gmail');
-            await applyRuleToExistingGmail(accessToken, conditions, actions);
+            const resolvedActions = { ...actions };
+            if (actions.moveToFolder) {
+                resolvedActions.moveToFolder = actionObj.addLabelIds?.[0];
+            }
+            await applyRuleToExistingGmail(accessToken, conditions, resolvedActions);
         }
 
         return { success: true, account_id: accountId, provider: 'google', rule: filter };
     } else {
+        const { resolveOutlookFolderId } = await import('../lib/email/outlook');
+
         // Outlook maps fairly directly
         const outCond: any = {};
         if (conditions.from) outCond.senderContains = conditions.from;
@@ -493,7 +499,9 @@ export async function createEmailRule(
         const outAct: any = {};
         if (actions.markAsRead) outAct.markAsRead = true;
         if (actions.delete) outAct.delete = true;
-        if (actions.moveToFolder) outAct.moveToFolder = actions.moveToFolder;
+        if (actions.moveToFolder) {
+            outAct.moveToFolder = await resolveOutlookFolderId(accessToken, actions.moveToFolder, true);
+        }
 
         // Microsoft requires a sequence number, default to 10 for new rules
         const rule = await createOutlookRule(accessToken, name, 10, outCond, outAct);
@@ -526,6 +534,8 @@ export async function updateEmailRule(
         await deleteGmailFilter(accessToken, ruleId);
         return await createEmailRule(env, clientId, accountId, name, conditions, actions, applyToExisting);
     } else {
+        const { resolveOutlookFolderId } = await import('../lib/email/outlook');
+
         const outCond: any = {};
         if (conditions.from) outCond.senderContains = conditions.from;
         if (conditions.to) outCond.recipientContains = conditions.to;
@@ -535,7 +545,9 @@ export async function updateEmailRule(
         const outAct: any = {};
         if (actions.markAsRead) outAct.markAsRead = true;
         if (actions.delete) outAct.delete = true;
-        if (actions.moveToFolder) outAct.moveToFolder = actions.moveToFolder;
+        if (actions.moveToFolder) {
+            outAct.moveToFolder = await resolveOutlookFolderId(accessToken, actions.moveToFolder, true);
+        }
 
         const rule = await updateOutlookRule(accessToken, ruleId, name, outCond, outAct);
 

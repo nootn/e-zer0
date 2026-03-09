@@ -360,7 +360,9 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
                     moveToFolder: z
                         .string()
                         .optional()
-                        .describe('Move matching emails to this folder/label ID (use list_folders to get IDs)'),
+                        .describe(
+                            'Move matching emails to this folder. For Gmail, you may use a label ID, label name, or nested path like "Projects/Active". For Outlook, you may use a folder ID, folder name, or nested path like "Projects/Active".'
+                        ),
                 })
                 .describe('Actions to perform when conditions are met'),
             applyToExisting: z
@@ -427,7 +429,12 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
                 .object({
                     markAsRead: z.boolean().optional(),
                     delete: z.boolean().optional(),
-                    moveToFolder: z.string().optional(),
+                    moveToFolder: z
+                        .string()
+                        .optional()
+                        .describe(
+                            'For Gmail, you may use a label ID, label name, or nested path like "Projects/Active". For Outlook, you may use a folder ID, folder name, or nested path like "Projects/Active".'
+                        ),
                 })
                 .describe('Full new action set for the rule'),
             applyToExisting: z

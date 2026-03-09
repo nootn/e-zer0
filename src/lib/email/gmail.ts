@@ -211,6 +211,38 @@ export async function createGmailLabel(accessToken: string, name: string): Promi
     return { id: data.id, name: data.name, type: 'user' };
 }
 
+function normalizeGmailLabelRef(labelRef: string): string {
+    return labelRef
+        .split(/[\\/]+/)
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+        .join('/');
+}
+
+export async function resolveGmailLabelId(
+    accessToken: string,
+    labelRef: string,
+    createIfMissing = false
+): Promise<string> {
+    const normalizedRef = normalizeGmailLabelRef(labelRef);
+    if (!normalizedRef) throw new Error('Empty label reference');
+
+    const labels = await listGmailLabels(accessToken);
+
+    const byId = labels.find((label) => label.id === normalizedRef);
+    if (byId) return byId.id;
+
+    const byName = labels.find((label) => label.name.toLowerCase() === normalizedRef.toLowerCase());
+    if (byName) return byName.id;
+
+    if (!createIfMissing) {
+        throw new Error(`Gmail label not found: ${labelRef}`);
+    }
+
+    const created = await createGmailLabel(accessToken, normalizedRef);
+    return created.id;
+}
+
 /**
  * Move email to a "folder" in Gmail by applying a label.
  * Maps well-known folder names to Gmail system labels.
@@ -242,14 +274,9 @@ export async function moveGmailToFolder(
         return { action: 'moved', folder: normalized };
     }
 
-    // Custom label — find or create it
-    const labels = await listGmailLabels(accessToken);
-    let label = labels.find((l) => l.name.toLowerCase() === normalized);
-    if (!label) {
-        label = await createGmailLabel(accessToken, folderName);
-    }
-    await modifyGmailMessage(accessToken, messageId, [label.id], ['INBOX']);
-    return { action: 'moved', folder: label.name };
+    const labelId = await resolveGmailLabelId(accessToken, folderName, true);
+    await modifyGmailMessage(accessToken, messageId, [labelId], ['INBOX']);
+    return { action: 'moved', folder: normalizeGmailLabelRef(folderName) };
 }
 
 // ── Filter (Rule) Management ────────────────────────────

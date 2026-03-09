@@ -89,15 +89,20 @@ export async function searchOutlookMessages(accessToken: string, options: GetEma
         }
     }
 
+    // Strip double-quotes from user input — they conflict with Graph API's OData $search="..." outer
+    // string delimiters and cause KQL syntax errors (e.g. subject:"Sydney Angels" inside $search="..."
+    // makes the parser see an unterminated string).
+    const sanitizeKql = (s: string) => s.replace(/"/g, '');
+
     const searchParts: string[] = [];
     if (options.is_read !== undefined) {
         searchParts.push(`isread:${options.is_read}`);
     }
     if (options.from) {
-        searchParts.push(`from:"${options.from}"`);
+        searchParts.push(`from:${sanitizeKql(options.from)}`);
     }
     if (options.subject) {
-        searchParts.push(`subject:"${options.subject}"`);
+        searchParts.push(`subject:${sanitizeKql(options.subject)}`);
     }
     if (options.after) {
         let afterVal = options.after;
@@ -105,7 +110,7 @@ export async function searchOutlookMessages(accessToken: string, options: GetEma
             const ts = new Date(afterVal);
             if (!isNaN(ts.getTime())) afterVal = ts.toISOString();
         }
-        searchParts.push(`received>="${afterVal}"`);
+        searchParts.push(`received>=${afterVal}`);
     }
     if (options.before) {
         let beforeVal = options.before;
@@ -113,7 +118,7 @@ export async function searchOutlookMessages(accessToken: string, options: GetEma
             const ts = new Date(beforeVal);
             if (!isNaN(ts.getTime())) beforeVal = ts.toISOString();
         }
-        searchParts.push(`received<"${beforeVal}"`);
+        searchParts.push(`received<=${beforeVal}`);
     }
 
     // Graph API queries
@@ -198,15 +203,156 @@ export interface OutlookFolder {
     id: string;
     name: string;
     parentFolderId?: string;
+    path?: string;
 }
 
 export async function listOutlookFolders(accessToken: string): Promise<OutlookFolder[]> {
-    const data = await graphFetch(accessToken, '/mailFolders?$top=100');
-    return (data.value || []).map((f: any) => ({
-        id: f.id,
-        name: f.displayName,
-        parentFolderId: f.parentFolderId,
+    const folders = await listAllOutlookFoldersFlat(accessToken);
+    return withOutlookFolderPaths(folders);
+}
+
+/**
+ * Recursively fetch all folders (top-level + all child folders).
+ * Returns a flat list with parentFolderId so callers can reconstruct the tree.
+ */
+async function listAllOutlookFoldersFlat(accessToken: string): Promise<OutlookFolder[]> {
+    const topLevel = await graphFetch(accessToken, '/mailFolders?$top=100&includeHiddenFolders=false');
+    const result: OutlookFolder[] = [];
+
+    async function fetchChildren(parentId: string) {
+        const data = await graphFetch(accessToken, `/mailFolders/${parentId}/childFolders?$top=100`);
+        const rawChildren: any[] = data.value || [];
+        const children: OutlookFolder[] = rawChildren.map((f: any) => ({
+            id: f.id,
+            name: f.displayName,
+            parentFolderId: f.parentFolderId,
+        }));
+        result.push(...children);
+        for (const raw of rawChildren) {
+            if (raw.childFolderCount > 0) {
+                await fetchChildren(raw.id);
+            }
+        }
+    }
+
+    for (const f of topLevel.value || []) {
+        result.push({ id: f.id, name: f.displayName, parentFolderId: f.parentFolderId });
+        if (f.childFolderCount > 0) {
+            await fetchChildren(f.id);
+        }
+    }
+    return result;
+}
+
+function splitOutlookFolderPath(folderPath: string): string[] {
+    return folderPath
+        .split(/[\\/]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+}
+
+function withOutlookFolderPaths(folders: OutlookFolder[]): OutlookFolder[] {
+    const byId = new Map(folders.map((folder) => [folder.id, folder]));
+
+    const buildPath = (folder: OutlookFolder): string => {
+        if (folder.path) return folder.path;
+
+        const parts = [folder.name];
+        let parentId = folder.parentFolderId;
+
+        while (parentId) {
+            const parent = byId.get(parentId);
+            if (!parent) break;
+            parts.unshift(parent.name);
+            parentId = parent.parentFolderId;
+        }
+
+        folder.path = parts.join('/');
+        return folder.path;
+    };
+
+    return folders.map((folder) => ({
+        ...folder,
+        path: buildPath(folder),
     }));
+}
+
+/**
+ * Given a slash-separated path like "Work/Projects/Active", resolve or create
+ * the full folder hierarchy in Outlook and return the leaf folder ID.
+ *
+ * Each segment is looked up as a child of the previous segment, and created
+ * if it doesn't exist. Top-level segments are looked up/created under /mailFolders.
+ */
+async function resolveOrCreateFolderPath(accessToken: string, folderPath: string): Promise<string> {
+    const segments = splitOutlookFolderPath(folderPath);
+    if (segments.length === 0) throw new Error('Empty folder path');
+
+    // Fetch all known folders once for efficient lookup
+    const allFolders = await listAllOutlookFoldersFlat(accessToken);
+
+    let parentId: string | null = null; // null = top-level
+    let currentId: string | null = null;
+
+    for (const segment of segments) {
+        const existing = allFolders.find(
+            (f) => f.name.toLowerCase() === segment.toLowerCase() && f.parentFolderId === (parentId ?? undefined)
+        );
+
+        if (existing) {
+            currentId = existing.id;
+        } else if (parentId === null) {
+            // Create top-level folder
+            const created = await graphFetch(accessToken, '/mailFolders', {
+                method: 'POST',
+                body: JSON.stringify({ displayName: segment }),
+            });
+            currentId = created.id;
+            // Add to allFolders so subsequent segments can find it
+            allFolders.push({ id: created.id, name: created.displayName, parentFolderId: undefined });
+        } else {
+            // Create child folder under parentId
+            const created = await graphFetch(accessToken, `/mailFolders/${parentId}/childFolders`, {
+                method: 'POST',
+                body: JSON.stringify({ displayName: segment }),
+            });
+            currentId = created.id;
+            allFolders.push({ id: created.id, name: created.displayName, parentFolderId: parentId });
+        }
+
+        parentId = currentId;
+    }
+
+    return currentId!;
+}
+
+export async function resolveOutlookFolderId(
+    accessToken: string,
+    folderRef: string,
+    createIfMissing = false
+): Promise<string> {
+    const normalizedRef = folderRef.trim();
+    if (!normalizedRef) throw new Error('Empty folder reference');
+
+    const folders = withOutlookFolderPaths(await listAllOutlookFoldersFlat(accessToken));
+
+    const byId = folders.find((folder) => folder.id === normalizedRef);
+    if (byId) return byId.id;
+
+    const pathSegments = splitOutlookFolderPath(normalizedRef);
+    if (pathSegments.length > 1) {
+        const normalizedPath = pathSegments.join('/').toLowerCase();
+        const byPath = folders.find((folder) => folder.path?.toLowerCase() === normalizedPath);
+        if (byPath) return byPath.id;
+        if (createIfMissing) return resolveOrCreateFolderPath(accessToken, normalizedRef);
+        throw new Error(`Outlook folder not found: ${folderRef}`);
+    }
+
+    const byName = folders.find((folder) => folder.name.toLowerCase() === normalizedRef.toLowerCase());
+    if (byName) return byName.id;
+    if (createIfMissing) return resolveOrCreateFolderPath(accessToken, normalizedRef);
+
+    throw new Error(`Outlook folder not found: ${folderRef}`);
 }
 
 export async function createOutlookFolder(accessToken: string, name: string): Promise<OutlookFolder> {
@@ -246,7 +392,14 @@ export async function moveOutlookToFolder(
         return { action: 'moved', folder: normalized };
     }
 
-    // Custom folder — find or create it
+    // Nested path (e.g. "Work/Projects/Active") — resolve or create full hierarchy
+    if (splitOutlookFolderPath(folderName).length > 1) {
+        const folderId = await resolveOrCreateFolderPath(accessToken, folderName);
+        await moveOutlookMessage(accessToken, messageId, folderId);
+        return { action: 'moved', folder: folderName };
+    }
+
+    // Flat custom folder — find or create at top level
     const folders = await listOutlookFolders(accessToken);
     let folder = folders.find((f) => f.name.toLowerCase() === normalized);
     if (!folder) {
