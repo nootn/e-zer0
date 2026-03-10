@@ -16,8 +16,8 @@ Because e-zer0 is hosted securely on Cloudflare as a remote Model Context Protoc
 3. Navigate to the **Connectors** tab.
 4. Scroll to the bottom of the list and click **Add custom connector**.
 5. Give your connector a name (e.g., "e-zer0 Mail").
-6. In the **URL** field, paste the full URL to your deployed Cloudflare Worker's SSE endpoint:
-   `https://<YOUR_INSTANCE_NAME>.workers.dev/mcp/sse`
+6. In the **URL** field, paste the full URL to your deployed Cloudflare Worker's MCP endpoint:
+   `https://<YOUR_INSTANCE_NAME>.workers.dev/mcp`
 
 **3. Authenticate**
 1. Once you enter the URL, Claude will attempt to connect and detect that authentication is required.

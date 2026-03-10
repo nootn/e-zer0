@@ -301,7 +301,17 @@ const handleMcpConnection = async (c: Context<{ Bindings: Env }>) => {
 
 mcp.post('/', handleMcpConnection);
 mcp.post('/sse', handleMcpConnection);
-mcp.get('/sse', handleMcpConnection);
+mcp.get('/sse', (c) => {
+    // Legacy SSE transport is not supported. This server uses Streamable HTTP (POST /mcp).
+    // Returning 405 immediately prevents the Worker from hanging on long-lived SSE GET requests.
+    return c.json(
+        {
+            error: 'SSE transport not supported. Use Streamable HTTP: POST /mcp with MCP-Protocol-Version: 2025-03-26 or later.',
+        },
+        405,
+        { Allow: 'POST' }
+    );
+});
 
 // ── Health check ────────────────────────────────────────
 mcp.get('/', async (c) => {

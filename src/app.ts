@@ -74,15 +74,16 @@ app.get('/.well-known/oauth-authorization-server', (c) => {
 app.get('/.well-known/oauth-protected-resource', (c) => {
     const baseUrl = new URL(c.req.url).origin;
     return c.json({
-        resource: `${baseUrl}/mcp/sse`,
+        resource: `${baseUrl}/mcp`,
         authorization_servers: [baseUrl],
     });
 });
 
 app.get('/.well-known/oauth-protected-resource/mcp/sse', (c) => {
     const baseUrl = new URL(c.req.url).origin;
+    // Legacy SSE path — redirect discovery to the current Streamable HTTP endpoint
     return c.json({
-        resource: `${baseUrl}/mcp/sse`,
+        resource: `${baseUrl}/mcp`,
         authorization_servers: [baseUrl],
     });
 });
