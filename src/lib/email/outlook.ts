@@ -160,7 +160,7 @@ export async function searchOutlookMessages(accessToken: string, options: GetEma
 export async function getOutlookMessage(accessToken: string, messageId: string): Promise<EmailMessage> {
     const msg = await graphFetch(
         accessToken,
-        `/messages/${messageId}?$select=id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,isRead`
+        `/messages/${encodeURIComponent(messageId)}?$select=id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,isRead`
     );
 
     return {
@@ -176,7 +176,7 @@ export async function getOutlookMessage(accessToken: string, messageId: string):
 }
 
 export async function moveOutlookMessage(accessToken: string, messageId: string, folderId: string): Promise<void> {
-    await graphFetch(accessToken, `/messages/${messageId}/move`, {
+    await graphFetch(accessToken, `/messages/${encodeURIComponent(messageId)}/move`, {
         method: 'POST',
         body: JSON.stringify({ destinationId: folderId }),
     });
@@ -184,14 +184,14 @@ export async function moveOutlookMessage(accessToken: string, messageId: string,
 
 export async function deleteOutlookMessage(accessToken: string, messageId: string): Promise<void> {
     // Move to Deleted Items
-    await graphFetch(accessToken, `/messages/${messageId}/move`, {
+    await graphFetch(accessToken, `/messages/${encodeURIComponent(messageId)}/move`, {
         method: 'POST',
         body: JSON.stringify({ destinationId: 'deleteditems' }),
     });
 }
 
 export async function markOutlookMessageRead(accessToken: string, messageId: string, isRead: boolean): Promise<void> {
-    await graphFetch(accessToken, `/messages/${messageId}`, {
+    await graphFetch(accessToken, `/messages/${encodeURIComponent(messageId)}`, {
         method: 'PATCH',
         body: JSON.stringify({ isRead }),
     });
