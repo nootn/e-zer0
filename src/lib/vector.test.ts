@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { generateEmbedding, indexEmail, searchSimilar, deleteFromIndex } from './vector';
+import { generateEmbedding, indexEmail, indexEmailsBatch, searchSimilar, deleteFromIndex } from './vector';
 
 describe('generateEmbedding', () => {
     it('throws when AI is not available', async () => {
@@ -59,6 +59,68 @@ describe('indexEmail', () => {
                 }),
             }),
         ]);
+    });
+});
+
+describe('indexEmailsBatch', () => {
+    it('gracefully skips when vectorIndex or ai is undefined', async () => {
+        await indexEmailsBatch(undefined, undefined, [{ accountId: 1, messageId: 'msg1', text: 'hello' }]);
+        // Should not throw
+    });
+
+    it('gracefully skips when emails array is empty', async () => {
+        const mockAi = { run: vi.fn() } as any;
+        const mockIndex = { upsert: vi.fn() } as any;
+        await indexEmailsBatch(mockIndex, mockAi, []);
+        expect(mockAi.run).not.toHaveBeenCalled();
+        expect(mockIndex.upsert).not.toHaveBeenCalled();
+    });
+
+    it('makes one AI call and one upsert for multiple emails', async () => {
+        const mockAi = {
+            run: vi.fn().mockResolvedValue({
+                data: [
+                    [0.1, 0.2],
+                    [0.3, 0.4],
+                    [0.5, 0.6],
+                ],
+            }),
+        } as any;
+        const mockIndex = { upsert: vi.fn().mockResolvedValue(undefined) } as any;
+
+        const emails = [
+            { accountId: 1, messageId: 'msg-a', text: 'email one' },
+            { accountId: 1, messageId: 'msg-b', text: 'email two' },
+            { accountId: 1, messageId: 'msg-c', text: 'email three' },
+        ];
+
+        await indexEmailsBatch(mockIndex, mockAi, emails);
+
+        // Only 1 AI call with all texts batched
+        expect(mockAi.run).toHaveBeenCalledTimes(1);
+        expect(mockAi.run.mock.calls[0][1].text).toHaveLength(3);
+
+        // Only 1 upsert call with all vectors
+        expect(mockIndex.upsert).toHaveBeenCalledTimes(1);
+        expect(mockIndex.upsert.mock.calls[0][0]).toHaveLength(3);
+    });
+
+    it('caps batch at MAX_BATCH_SIZE (20)', async () => {
+        const emails = Array.from({ length: 25 }, (_, i) => ({
+            accountId: 1,
+            messageId: `msg-${i}`,
+            text: `email ${i}`,
+        }));
+        const embeddings = Array.from({ length: 20 }, (_, i) => [i * 0.1]);
+        const mockAi = {
+            run: vi.fn().mockResolvedValue({ data: embeddings }),
+        } as any;
+        const mockIndex = { upsert: vi.fn().mockResolvedValue(undefined) } as any;
+
+        await indexEmailsBatch(mockIndex, mockAi, emails);
+
+        expect(mockAi.run.mock.calls[0][1].text).toHaveLength(20);
+        expect(mockIndex.upsert.mock.calls[0][0]).toHaveLength(20);
     });
 });
 

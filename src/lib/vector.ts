@@ -1,5 +1,9 @@
 // Vector embedding and search utilities using Cloudflare Workers AI + Vectorize
 
+// Max emails to index per Worker invocation — keeps subrequest count predictable.
+// Each batch of N emails costs exactly 2 subrequests (1 AI + 1 Vectorize upsert).
+const MAX_BATCH_SIZE = 20;
+
 // Vectorize enforces a 64-byte max on vector IDs. Email message IDs (especially
 // Outlook's base64-encoded IDs) can exceed this, so we hash the composite key.
 async function vectorId(accountId: number, messageId: string): Promise<string> {
@@ -8,6 +12,22 @@ async function vectorId(accountId: number, messageId: string): Promise<string> {
     return Array.from(new Uint8Array(digest))
         .map((b) => b.toString(16).padStart(2, '0'))
         .join(''); // 64 hex chars — exactly at the Vectorize limit
+}
+
+async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            return await fn();
+        } catch (err) {
+            lastError = err;
+            if (attempt < maxAttempts) {
+                // Exponential backoff: 200ms, 400ms
+                await new Promise((resolve) => setTimeout(resolve, 200 * attempt));
+            }
+        }
+    }
+    throw lastError;
 }
 
 export async function generateEmbedding(ai: Ai | undefined, text: string): Promise<number[]> {
@@ -20,6 +40,50 @@ export async function generateEmbedding(ai: Ai | undefined, text: string): Promi
     })) as { data: number[][] };
 
     return result.data[0];
+}
+
+export interface EmailToIndex {
+    accountId: number;
+    messageId: string;
+    text: string;
+}
+
+/**
+ * Index a batch of emails using a single Workers AI call and a single Vectorize upsert.
+ * This costs exactly 2 subrequests regardless of how many emails are in the batch,
+ * avoiding the "Too many subrequests" error when indexing large result sets.
+ */
+export async function indexEmailsBatch(
+    vectorIndex: VectorizeIndex | undefined,
+    ai: Ai | undefined,
+    emails: EmailToIndex[]
+): Promise<void> {
+    if (!vectorIndex || !ai || emails.length === 0) return;
+
+    // Cap per invocation to keep subrequest budget predictable
+    const batch = emails.slice(0, MAX_BATCH_SIZE);
+    const texts = batch.map((e) => e.text.substring(0, 500));
+
+    // Single AI call for all embeddings
+    const result = await withRetry(
+        () => ai.run('@cf/baai/bge-small-en-v1.5', { text: texts }) as Promise<{ data: number[][] }>
+    );
+
+    const indexedAt = Math.floor(Date.now() / 1000);
+    const vectors = await Promise.all(
+        batch.map(async (email, i) => ({
+            id: await vectorId(email.accountId, email.messageId),
+            values: result.data[i],
+            metadata: {
+                account_id: email.accountId,
+                message_id: email.messageId,
+                indexed_at: indexedAt,
+            },
+        }))
+    );
+
+    // Single Vectorize upsert for all vectors
+    await withRetry(() => vectorIndex.upsert(vectors));
 }
 
 export async function indexEmail(

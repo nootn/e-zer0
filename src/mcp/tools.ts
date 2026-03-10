@@ -21,7 +21,7 @@ import {
     updateOutlookRule,
     deleteOutlookRule,
 } from '../lib/email/outlook';
-import { indexEmail, searchSimilar, deleteFromIndex } from '../lib/vector';
+import { indexEmailsBatch, searchSimilar, deleteFromIndex } from '../lib/vector';
 import { sanitizeEmailContent } from '../lib/sanitizer';
 
 // ── Audit Logger ────────────────────────────────────────
@@ -141,12 +141,17 @@ export async function readRecentEmails(
         messages = await listOutlookMessages(accessToken, count, unreadOnly);
     }
 
-    // Index emails for semantic search (best-effort)
+    // Index emails for semantic search (best-effort, batched to minimise subrequests)
     try {
-        for (const msg of messages) {
-            const text = `${msg.subject} ${msg.snippet || ''}`;
-            await indexEmail(env.VECTOR_INDEX, env.AI, account.id, msg.id, text);
-        }
+        await indexEmailsBatch(
+            env.VECTOR_INDEX,
+            env.AI,
+            messages.map((msg: any) => ({
+                accountId: account.id,
+                messageId: msg.id,
+                text: `${msg.subject} ${msg.snippet || ''}`,
+            }))
+        );
     } catch (e) {
         // Vector indexing is best-effort — don't fail the tool
         console.error('Vector indexing error:', e);
@@ -210,12 +215,17 @@ export async function getEmails(
         messages = await searchOutlookMessages(accessToken, options);
     }
 
-    // Index emails for semantic search (best-effort)
+    // Index emails for semantic search (best-effort, batched to minimise subrequests)
     try {
-        for (const msg of messages) {
-            const text = `${msg.subject} ${msg.snippet || ''}`;
-            await indexEmail(env.VECTOR_INDEX, env.AI, account.id, msg.id, text);
-        }
+        await indexEmailsBatch(
+            env.VECTOR_INDEX,
+            env.AI,
+            messages.map((msg: any) => ({
+                accountId: account.id,
+                messageId: msg.id,
+                text: `${msg.subject} ${msg.snippet || ''}`,
+            }))
+        );
     } catch (e) {
         // Vector indexing is best-effort — don't fail the tool
         console.error('Vector indexing error:', e);

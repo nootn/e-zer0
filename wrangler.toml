@@ -32,6 +32,12 @@ binding = "RATE_LIMITER"
 id = "local"
 preview_id = "local"
 
+# ── Worker Limits ─────────────────────────────────────────
+# Raise subrequest ceiling (default 50) to guard against spikes.
+# Vectorize batching keeps normal usage well under 50, but this is a safety net.
+[limits]
+subrequests = 1000
+
 # ── Cron Triggers (uncomment for remote deploy) ─────────
 # [triggers]
 # crons = ["0 * * * *"]
