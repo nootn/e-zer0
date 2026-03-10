@@ -51,7 +51,7 @@ describe('indexEmail', () => {
 
         expect(mockIndex.upsert).toHaveBeenCalledWith([
             expect.objectContaining({
-                id: '42:msg-abc',
+                id: '0aee47c066a8883b81c9dc2a9163851b8179cb0b66a8a566cd71014b37374526',
                 metadata: expect.objectContaining({
                     account_id: 42,
                     message_id: 'msg-abc',
@@ -98,6 +98,8 @@ describe('deleteFromIndex', () => {
     it('calls deleteByIds with correct composite ID', async () => {
         const mockIndex = { deleteByIds: vi.fn().mockResolvedValue(undefined) } as any;
         await deleteFromIndex(mockIndex, 42, 'msg-abc');
-        expect(mockIndex.deleteByIds).toHaveBeenCalledWith(['42:msg-abc']);
+        expect(mockIndex.deleteByIds).toHaveBeenCalledWith([
+            '0aee47c066a8883b81c9dc2a9163851b8179cb0b66a8a566cd71014b37374526',
+        ]);
     });
 });

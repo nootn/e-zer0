@@ -1,5 +1,15 @@
 // Vector embedding and search utilities using Cloudflare Workers AI + Vectorize
 
+// Vectorize enforces a 64-byte max on vector IDs. Email message IDs (especially
+// Outlook's base64-encoded IDs) can exceed this, so we hash the composite key.
+async function vectorId(accountId: number, messageId: string): Promise<string> {
+    const raw = `${accountId}:${messageId}`;
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
+    return Array.from(new Uint8Array(digest))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join(''); // 64 hex chars — exactly at the Vectorize limit
+}
+
 export async function generateEmbedding(ai: Ai | undefined, text: string): Promise<number[]> {
     if (!ai) throw new Error('Workers AI not available (local dev mode)');
     // Truncate to ~500 chars for the embedding model
@@ -24,7 +34,7 @@ export async function indexEmail(
 
     await vectorIndex.upsert([
         {
-            id: `${accountId}:${messageId}`,
+            id: await vectorId(accountId, messageId),
             values: embedding,
             metadata: {
                 account_id: accountId,
@@ -73,5 +83,5 @@ export async function deleteFromIndex(
     messageId: string
 ): Promise<void> {
     if (!vectorIndex) return; // Gracefully skip in local dev
-    await vectorIndex.deleteByIds([`${accountId}:${messageId}`]);
+    await vectorIndex.deleteByIds([await vectorId(accountId, messageId)]);
 }
