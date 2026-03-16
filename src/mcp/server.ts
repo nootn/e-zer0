@@ -285,7 +285,7 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
         'Semantically search across indexed emails using natural language (e.g. "flight bookings", "invoices from Amazon")',
         {
             query: z.string().describe('Natural language search query'),
-            account_id: z.number().optional().describe('Optional: limit search to a specific account'),
+            account_id: z.number().describe('The ID of the email account to search within'),
             top_k: z.number().optional().default(10).describe('Number of results to return (default: 10)'),
         },
         async ({ query, account_id, top_k }) => {

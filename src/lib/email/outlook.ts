@@ -295,9 +295,15 @@ async function resolveOrCreateFolderPath(accessToken: string, folderPath: string
     let currentId: string | null = null;
 
     for (const segment of segments) {
-        const existing = allFolders.find(
-            (f) => f.name.toLowerCase() === segment.toLowerCase() && f.parentFolderId === (parentId ?? undefined)
-        );
+        const existing = allFolders.find((f) => {
+            if (f.name.toLowerCase() !== segment.toLowerCase()) return false;
+            if (parentId === null) {
+                // Top-level folders have parentFolderId pointing to the root structure,
+                // which is not included in our fetched allFolders list.
+                return !allFolders.some((p) => p.id === f.parentFolderId);
+            }
+            return f.parentFolderId === parentId;
+        });
 
         if (existing) {
             currentId = existing.id;
@@ -392,21 +398,9 @@ export async function moveOutlookToFolder(
         return { action: 'moved', folder: normalized };
     }
 
-    // Nested path (e.g. "Work/Projects/Active") — resolve or create full hierarchy
-    if (splitOutlookFolderPath(folderName).length > 1) {
-        const folderId = await resolveOrCreateFolderPath(accessToken, folderName);
-        await moveOutlookMessage(accessToken, messageId, folderId);
-        return { action: 'moved', folder: folderName };
-    }
-
-    // Flat custom folder — find or create at top level
-    const folders = await listOutlookFolders(accessToken);
-    let folder = folders.find((f) => f.name.toLowerCase() === normalized);
-    if (!folder) {
-        folder = await createOutlookFolder(accessToken, folderName);
-    }
-    await moveOutlookMessage(accessToken, messageId, folder.id);
-    return { action: 'moved', folder: folder.name };
+    const folderId = await resolveOutlookFolderId(accessToken, folderName, true);
+    await moveOutlookMessage(accessToken, messageId, folderId);
+    return { action: 'moved', folder: folderName };
 }
 
 // ── Rule Management ─────────────────────────────────────

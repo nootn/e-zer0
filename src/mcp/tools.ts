@@ -323,30 +323,21 @@ export async function searchEmailsSemantic(
     env: Env,
     clientId: string,
     query: string,
-    accountId?: number,
+    accountId: number,
     topK = 10
 ): Promise<any> {
-    // 1. Pre-filter by authorized accounts to prevent vector metadata leakage
+    // 1. Authorize explicitly requested account to prevent cross-tenant vector scanning
     const allowed = await env.DB.prepare(
-        `SELECT email_account_id FROM mcp_client_accounts mca
+        `SELECT 1 FROM mcp_client_accounts mca
          JOIN mcp_clients mc ON mc.id = mca.mcp_client_id
-         WHERE mc.client_id = ?`
+         WHERE mc.client_id = ? AND mca.email_account_id = ?`
     )
-        .bind(clientId)
-        .all<{ email_account_id: number }>();
+        .bind(clientId, accountId)
+        .first();
 
-    const allowedAccountIds = allowed.results.map((r) => r.email_account_id);
-    if (allowedAccountIds.length === 0) return { query, results: [] };
+    if (!allowed) return { query, results: [] };
 
-    let searchIds = allowedAccountIds;
-    if (accountId) {
-        if (!allowedAccountIds.includes(accountId)) {
-            return { query, results: [] }; // Unauthorized specifically requested account
-        }
-        searchIds = [accountId];
-    }
-
-    const results = await searchSimilar(env.VECTOR_INDEX, env.AI, query, topK, searchIds);
+    const results = await searchSimilar(env.VECTOR_INDEX, env.AI, query, topK, [accountId]);
 
     // Fetch full message details for top results
     const enrichedResults = [];
