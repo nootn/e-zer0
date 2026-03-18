@@ -31,6 +31,14 @@ async function graphFetch(accessToken: string, path: string, options?: RequestIn
     return res.json();
 }
 
+// Helper to encode Graph API IDs. Hotmail/Outlook IDs can end in '==' padding.
+// Some Graph API infrastructure fails with ErrorInvalidIdMalformed if the ID is
+// passed as %3D%3D because it attempts to Base64-decode before URL-decoding it.
+// We also trim to prevent issues with trailing newlines from LLM arguments.
+function encodeGraphId(id: string): string {
+    return encodeURIComponent(id.trim()).replace(/%3D/gi, '=');
+}
+
 export async function listOutlookMessages(
     accessToken: string,
     maxResults = 10,
@@ -160,7 +168,7 @@ export async function searchOutlookMessages(accessToken: string, options: GetEma
 export async function getOutlookMessage(accessToken: string, messageId: string): Promise<EmailMessage> {
     const msg = await graphFetch(
         accessToken,
-        `/messages/${encodeURIComponent(messageId)}?$select=id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,isRead`
+        `/messages/${encodeGraphId(messageId)}?$select=id,subject,from,toRecipients,receivedDateTime,bodyPreview,body,isRead`
     );
 
     return {
@@ -176,7 +184,7 @@ export async function getOutlookMessage(accessToken: string, messageId: string):
 }
 
 export async function moveOutlookMessage(accessToken: string, messageId: string, folderId: string): Promise<void> {
-    await graphFetch(accessToken, `/messages/${encodeURIComponent(messageId)}/move`, {
+    await graphFetch(accessToken, `/messages/${encodeGraphId(messageId)}/move`, {
         method: 'POST',
         body: JSON.stringify({ destinationId: folderId }),
     });
@@ -184,14 +192,14 @@ export async function moveOutlookMessage(accessToken: string, messageId: string,
 
 export async function deleteOutlookMessage(accessToken: string, messageId: string): Promise<void> {
     // Move to Deleted Items
-    await graphFetch(accessToken, `/messages/${encodeURIComponent(messageId)}/move`, {
+    await graphFetch(accessToken, `/messages/${encodeGraphId(messageId)}/move`, {
         method: 'POST',
         body: JSON.stringify({ destinationId: 'deleteditems' }),
     });
 }
 
 export async function markOutlookMessageRead(accessToken: string, messageId: string, isRead: boolean): Promise<void> {
-    await graphFetch(accessToken, `/messages/${encodeURIComponent(messageId)}`, {
+    await graphFetch(accessToken, `/messages/${encodeGraphId(messageId)}`, {
         method: 'PATCH',
         body: JSON.stringify({ isRead }),
     });
@@ -220,7 +228,7 @@ async function listAllOutlookFoldersFlat(accessToken: string): Promise<OutlookFo
     const result: OutlookFolder[] = [];
 
     async function fetchChildren(parentId: string) {
-        const data = await graphFetch(accessToken, `/mailFolders/${parentId}/childFolders?$top=100`);
+        const data = await graphFetch(accessToken, `/mailFolders/${encodeGraphId(parentId)}/childFolders?$top=100`);
         const rawChildren: any[] = data.value || [];
         const children: OutlookFolder[] = rawChildren.map((f: any) => ({
             id: f.id,
@@ -318,7 +326,7 @@ async function resolveOrCreateFolderPath(accessToken: string, folderPath: string
             allFolders.push({ id: created.id, name: created.displayName, parentFolderId: undefined });
         } else {
             // Create child folder under parentId
-            const created = await graphFetch(accessToken, `/mailFolders/${parentId}/childFolders`, {
+            const created = await graphFetch(accessToken, `/mailFolders/${encodeGraphId(parentId)}/childFolders`, {
                 method: 'POST',
                 body: JSON.stringify({ displayName: segment }),
             });
@@ -465,14 +473,14 @@ export async function updateOutlookRule(
     if (conditions) body.conditions = conditions;
     if (actions) body.actions = actions;
 
-    return await graphFetch(accessToken, `/mailFolders/inbox/messageRules/${ruleId}`, {
+    return await graphFetch(accessToken, `/mailFolders/inbox/messageRules/${encodeGraphId(ruleId)}`, {
         method: 'PATCH',
         body: JSON.stringify(body),
     });
 }
 
 export async function deleteOutlookRule(accessToken: string, ruleId: string): Promise<void> {
-    await graphFetch(accessToken, `/mailFolders/inbox/messageRules/${ruleId}`, {
+    await graphFetch(accessToken, `/mailFolders/inbox/messageRules/${encodeGraphId(ruleId)}`, {
         method: 'DELETE',
     });
 }
