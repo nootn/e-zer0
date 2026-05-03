@@ -11,7 +11,7 @@ or in GitHub Actions — no SaaS signup required.
 | Job            | Tool          | Purpose                                                |
 | -------------- | ------------- | ------------------------------------------------------ |
 | `quality`      | tsc, prettier, vitest | Format, typecheck, tests                       |
-| `codeql`       | GitHub CodeQL | TypeScript/JavaScript static security analysis         |
+| `codeql`       | GitHub CodeQL | TypeScript/JavaScript static security analysis (see GHAS note below) |
 | `semgrep`      | Semgrep OSS   | Pattern-based source scanning (TS/JS/Node/OWASP top10) |
 | `dependencies` | npm audit + OSV Scanner | Known-CVE scanning across the dep tree       |
 | `secrets`      | Gitleaks      | Secret scanning of full git history                    |
@@ -136,6 +136,23 @@ Specific to this Workers/Hono/D1/Vectorize stack:
 - No public debug/echo endpoints
 - No source maps with sensitive comments shipped to production
 - Cookies (if added) must be `Secure`, `HttpOnly`, `SameSite=Lax` or stricter
+
+## CodeQL on private repositories
+
+CodeQL needs **Code Scanning** enabled in repo settings. On a private repo
+this requires GitHub Advanced Security (paid) or making the repo public
+(free).
+
+The `codeql` job is set to `continue-on-error: true` so it does not block
+PRs while disabled. To enable:
+
+1. Make the repository public, **or** turn on GHAS for the repo/org.
+2. `Settings` → `Code security` → enable Code scanning (advanced setup,
+   pointing at this workflow).
+3. Remove `continue-on-error: true` from the `codeql` job in
+   `.github/workflows/security.yml` so it becomes a required check.
+
+Until then, Semgrep OSS provides static analysis coverage.
 
 ## Follow-ups not yet automated
 
