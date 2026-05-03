@@ -1,0 +1,15 @@
+title = "e-zer0 gitleaks config"
+
+# Extend the default ruleset rather than replacing it.
+[extend]
+useDefault = true
+
+# Allow placeholder values inside example/template files. These never contain
+# real secrets — the live equivalents are gitignored or stored in encrypted D1.
+[allowlist]
+description = "Documented placeholders in example/template files"
+paths = [
+  '''(^|/)\.dev\.vars\.example$''',
+  '''(^|/)docs/.*\.md$''',
+  '''(^|/)README\.md$''',
+]
