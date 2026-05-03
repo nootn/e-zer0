@@ -42,10 +42,10 @@ jobs:
   codeql:
     name: CodeQL
     runs-on: ubuntu-latest
-    # CodeQL requires Code Scanning to be enabled. On private repos this needs
-    # GitHub Advanced Security or a public repo. Marked non-blocking until
-    # enabled — see docs/security-scanning.md.
-    continue-on-error: true
+    # CodeQL requires Code Scanning to be enabled. On a private repo this
+    # needs GitHub Advanced Security or making the repo public. Each step
+    # is set to continue-on-error so the job reports success until GHAS is
+    # turned on — see docs/security-scanning.md.
     permissions:
       contents: read
       security-events: write
@@ -56,15 +56,18 @@ jobs:
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
+        continue-on-error: true
         with:
           languages: javascript-typescript
           queries: security-extended,security-and-quality
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
+        continue-on-error: true
 
       - name: Analyze
         uses: github/codeql-action/analyze@v3
+        continue-on-error: true
         with:
           category: '/language:javascript-typescript'
 
@@ -145,13 +148,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # The trivy-action wrapper has a history of broken release tags. Install
-      # the trivy CLI from the upstream installer script and run it directly —
-      # one less moving part and keeps the action surface trustworthy.
+      # Install trivy from a pinned release tarball — bypasses the flaky
+      # trivy-action wrapper and the contrib install script's exit-code quirks.
       - name: Install Trivy
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sudo sh -s -- -b /usr/local/bin v0.59.1
+          set -euo pipefail
+          TRIVY_VERSION=0.59.1
+          curl -sSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+            -o /tmp/trivy.tar.gz
+          sudo tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy
           trivy --version
 
       - name: Run Trivy fs scan

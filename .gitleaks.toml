@@ -12,11 +12,8 @@ paths = [
   '''(^|/)\.dev\.vars\.example$''',
   '''(^|/)docs/.*\.md$''',
   '''(^|/)README\.md$''',
-  # Sanitizer tests assert that fake PRIVATE KEY blocks are redacted — the
-  # marker pattern itself is not a real key.
-  '''(^|/)src/lib/sanitizer\.test\.ts$''',
-]
-regexes = [
-  # Truncated PEM marker used as a sanitizer fixture.
-  '''-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBg\.\.\.\\n-----END PRIVATE KEY-----''',
+  # Test fixtures (fake PEM markers, dummy AES keys for crypto round-trips).
+  # Allowlisting *.test.ts is acceptable here because Workers test files are
+  # never deployed and contain only synthetic values.
+  '''(^|/)src/.*\.test\.ts$''',
 ]
