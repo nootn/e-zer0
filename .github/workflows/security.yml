@@ -145,13 +145,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The trivy-action wrapper has a history of broken release tags. Install
+      # the trivy CLI from the upstream installer script and run it directly —
+      # one less moving part and keeps the action surface trustworthy.
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin v0.59.1
+          trivy --version
+
       - name: Run Trivy fs scan
-        uses: aquasecurity/trivy-action@0.24.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          severity: CRITICAL,HIGH
-          exit-code: '1'
-          ignore-unfixed: true
-          skip-dirs: node_modules,.wrangler
-          format: table
+        run: |
+          trivy fs \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --skip-dirs node_modules,.wrangler \
+            --format table \
+            .

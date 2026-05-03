@@ -7,9 +7,16 @@ useDefault = true
 # Allow placeholder values inside example/template files. These never contain
 # real secrets — the live equivalents are gitignored or stored in encrypted D1.
 [allowlist]
-description = "Documented placeholders in example/template files"
+description = "Documented placeholders + sanitizer test fixtures"
 paths = [
   '''(^|/)\.dev\.vars\.example$''',
   '''(^|/)docs/.*\.md$''',
   '''(^|/)README\.md$''',
+  # Sanitizer tests assert that fake PRIVATE KEY blocks are redacted — the
+  # marker pattern itself is not a real key.
+  '''(^|/)src/lib/sanitizer\.test\.ts$''',
+]
+regexes = [
+  # Truncated PEM marker used as a sanitizer fixture.
+  '''-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBg\.\.\.\\n-----END PRIVATE KEY-----''',
 ]
