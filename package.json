@@ -21,7 +21,7 @@
         "check": "npm run format && npm run lint && npm run test",
         "ci:check": "npm ci && npm run check",
         "security:audit": "npm audit --audit-level=high --omit=dev",
-        "security:deps": "osv-scanner --recursive --skip-git ./",
+        "security:deps": "osv-scanner scan source --recursive ./",
         "security:secrets": "gitleaks detect --source . --verbose --redact",
         "security:semgrep": "semgrep scan --config p/typescript --config p/javascript --config p/nodejs --config p/owasp-top-ten --metrics=off",
         "security:trivy": "trivy fs --severity HIGH,CRITICAL --ignore-unfixed --skip-dirs node_modules,.wrangler .",
