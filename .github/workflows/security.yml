@@ -148,16 +148,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Install trivy from a pinned release tarball — bypasses the flaky
-      # trivy-action wrapper and the contrib install script's exit-code quirks.
       - name: Install Trivy
-        run: |
-          set -euo pipefail
-          TRIVY_VERSION=0.59.1
-          curl -sSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
-            -o /tmp/trivy.tar.gz
-          sudo tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy
-          trivy --version
+        uses: aquasecurity/setup-trivy@v0.2.3
+        with:
+          version: v0.59.1
 
       - name: Run Trivy fs scan
         run: |
