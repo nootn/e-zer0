@@ -14,6 +14,12 @@ import settingsRoutes from './routes/settings';
 import oauthRoutes from './routes/oauth-callback';
 import mcpRoutes from './routes/mcp';
 import authorizeRoutes from './routes/authorize';
+import registerRoutes from './routes/register';
+import {
+    SUPPORTED_CODE_CHALLENGE_METHODS,
+    SUPPORTED_GRANT_TYPES,
+    SUPPORTED_TOKEN_ENDPOINT_AUTH_METHODS,
+} from './lib/mcp-oauth';
 
 import { csrf } from 'hono/csrf';
 import { secureHeaders } from 'hono/secure-headers';
@@ -56,6 +62,7 @@ app.route('/settings', settingsRoutes);
 app.route('/oauth', oauthRoutes);
 app.route('/mcp', mcpRoutes);
 app.route('/authorize', authorizeRoutes);
+app.route('/register', registerRoutes);
 
 // OAuth Metadata endpoints (RFC 8414 / RFC 10064)
 app.get('/.well-known/oauth-authorization-server', (c) => {
@@ -64,9 +71,11 @@ app.get('/.well-known/oauth-authorization-server', (c) => {
         issuer: baseUrl,
         authorization_endpoint: `${baseUrl}/authorize`,
         token_endpoint: `${baseUrl}/mcp/token`,
+        registration_endpoint: `${baseUrl}/register`,
         response_types_supported: ['code'],
-        grant_types_supported: ['authorization_code', 'client_credentials'],
-        code_challenge_methods_supported: ['S256'],
+        grant_types_supported: [...SUPPORTED_GRANT_TYPES],
+        token_endpoint_auth_methods_supported: [...SUPPORTED_TOKEN_ENDPOINT_AUTH_METHODS],
+        code_challenge_methods_supported: [...SUPPORTED_CODE_CHALLENGE_METHODS],
         logo_uri: `${baseUrl}/logo.svg`,
     });
 });

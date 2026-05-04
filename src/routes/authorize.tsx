@@ -2,6 +2,7 @@
 import { Hono } from 'hono';
 import type { Env, McpClient } from '../types';
 import { Layout, Alert } from '../views/layout';
+import { isAllowedRedirectUri, parseStoredJsonArray } from '../lib/mcp-oauth';
 
 const authorize = new Hono<{ Bindings: Env; Variables: { userId: number; username: string } }>();
 
@@ -22,6 +23,10 @@ authorize.get('/', async (c) => {
         return c.text('Missing client_id or redirect_uri', 400);
     }
 
+    if (codeChallenge && codeChallengeMethod !== 'S256') {
+        return c.text('Only PKCE code_challenge_method=S256 is supported', 400);
+    }
+
     // Verify client exists
     const client = await c.env.DB.prepare('SELECT * FROM mcp_clients WHERE client_id = ? AND is_active = 1')
         .bind(clientId)
@@ -29,6 +34,10 @@ authorize.get('/', async (c) => {
 
     if (!client) {
         return c.text('Invalid or revoked client_id', 400);
+    }
+
+    if (!isAllowedRedirectUri(parseStoredJsonArray(client.redirect_uris), redirectUri)) {
+        return c.text('Invalid redirect_uri', 400);
     }
 
     return c.html(
@@ -68,6 +77,22 @@ authorize.post('/', async (c) => {
 
     if (!clientId || !redirectUri) {
         return c.text('Missing required fields', 400);
+    }
+
+    const client = await c.env.DB.prepare('SELECT * FROM mcp_clients WHERE client_id = ? AND is_active = 1')
+        .bind(clientId)
+        .first<McpClient>();
+
+    if (!client) {
+        return c.text('Invalid or revoked client_id', 400);
+    }
+
+    if (!isAllowedRedirectUri(parseStoredJsonArray(client.redirect_uris), redirectUri)) {
+        return c.text('Invalid redirect_uri', 400);
+    }
+
+    if (codeChallenge && codeChallengeMethod !== 'S256') {
+        return c.text('Only PKCE code_challenge_method=S256 is supported', 400);
     }
 
     const userId = c.get('userId');

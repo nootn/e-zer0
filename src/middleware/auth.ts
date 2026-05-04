@@ -6,6 +6,7 @@ import { validateSession } from '../lib/session';
 const PUBLIC_PATHS = [
     '/setup',
     '/login',
+    '/register',
     '/favicon.ico',
     '/.well-known/oauth-authorization-server',
     '/.well-known/oauth-protected-resource',

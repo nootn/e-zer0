@@ -57,6 +57,9 @@ export interface McpClient {
     client_id: string;
     secret_hash: string;
     salt: string;
+    redirect_uris?: string | null;
+    grant_types?: string | null;
+    token_endpoint_auth_method?: 'none' | 'client_secret_post' | null;
     is_active: number;
     last_used_at: string | null;
     created_at: string;

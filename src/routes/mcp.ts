@@ -5,10 +5,9 @@ import { verifyPassword } from '../lib/crypto';
 import { createMcpServer } from '../mcp/server';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { checkRateLimit, incrementRateLimit, clearRateLimit } from '../lib/rate-limit';
+import { ACCESS_TOKEN_TTL_SECONDS, REFRESH_TOKEN_TTL_SECONDS } from '../lib/mcp-oauth';
 
 const mcp = new Hono<{ Bindings: Env }>();
-const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
-const REFRESH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 
 // ── Simple JWT Implementation ───────────────────────────
 // Using a compact HMAC-SHA256 signed token (no external JWT library needed)
@@ -77,6 +76,7 @@ mcp.post('/token', async (c) => {
     let clientSecret: string | undefined;
     let code: string | undefined;
     let codeVerifier: string | undefined;
+    let redirectUri: string | undefined;
     let refreshTokenBody: string | undefined;
 
     if (contentType.includes('application/json')) {
@@ -86,6 +86,7 @@ mcp.post('/token', async (c) => {
         clientSecret = body.client_secret;
         code = body.code;
         codeVerifier = body.code_verifier;
+        redirectUri = body.redirect_uri;
         refreshTokenBody = body.refresh_token;
     } else {
         const form = await c.req.formData();
@@ -94,6 +95,7 @@ mcp.post('/token', async (c) => {
         clientSecret = form.get('client_secret')?.toString();
         code = form.get('code')?.toString();
         codeVerifier = form.get('code_verifier')?.toString();
+        redirectUri = form.get('redirect_uri')?.toString();
         refreshTokenBody = form.get('refresh_token')?.toString();
     }
 
@@ -166,14 +168,20 @@ mcp.post('/token', async (c) => {
     // 2. Grant validations
     if (grantType === 'authorization_code') {
         if (!code) return c.json({ error: 'code is required for authorization_code grant' }, 400);
+        if (!redirectUri) return c.json({ error: 'redirect_uri is required for authorization_code grant' }, 400);
 
         const authCode = await c.env.DB.prepare(
             "SELECT * FROM oauth_auth_codes WHERE id = ? AND client_id = ? AND expires_at > datetime('now')"
         )
             .bind(code, clientId)
-            .first<{ code_challenge: string | null }>();
+            .first<{ code_challenge: string | null; redirect_uri: string }>();
 
         if (!authCode) {
+            await incrementRateLimit(c.env.RATE_LIMITER, rlKey);
+            return c.json({ error: 'invalid_grant' }, 400);
+        }
+
+        if (authCode.redirect_uri !== redirectUri) {
             await incrementRateLimit(c.env.RATE_LIMITER, rlKey);
             return c.json({ error: 'invalid_grant' }, 400);
         }
