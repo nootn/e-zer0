@@ -5,19 +5,33 @@ import { normalizeDynamicClientRegistration } from '../lib/mcp-oauth';
 import { checkRateLimit, incrementRateLimit } from '../lib/rate-limit';
 
 const register = new Hono<{ Bindings: Env }>();
+const REGISTER_BURST_LIMIT = 5;
+const REGISTER_DAILY_LIMIT = 25;
 
 register.post('/', async (c) => {
     const ip = c.req.header('CF-Connecting-IP') || 'unknown';
-    const rlKey = `rate_limit:register:${ip}`;
+    const burstKey = `rate_limit:register:burst:${ip}`;
+    const dailyKey = `rate_limit:register:daily:${ip}`;
 
-    if (!(await checkRateLimit(c.env.RATE_LIMITER, rlKey))) {
+    if (!(await checkRateLimit(c.env.RATE_LIMITER, burstKey, REGISTER_BURST_LIMIT))) {
         return c.json(
             { error: 'too_many_requests', error_description: 'Too many registration attempts. Try again later.' },
             429
         );
     }
 
-    await incrementRateLimit(c.env.RATE_LIMITER, rlKey);
+    if (!(await checkRateLimit(c.env.RATE_LIMITER, dailyKey, REGISTER_DAILY_LIMIT))) {
+        return c.json(
+            {
+                error: 'too_many_requests',
+                error_description: 'Daily registration limit reached for this IP. Try again tomorrow.',
+            },
+            429
+        );
+    }
+
+    await incrementRateLimit(c.env.RATE_LIMITER, burstKey);
+    await incrementRateLimit(c.env.RATE_LIMITER, dailyKey, 24 * 60 * 60);
 
     let body: unknown;
 

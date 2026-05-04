@@ -40,13 +40,11 @@ jobs:
               run: npm test
 
     codeql:
-        name: CodeQL (non-blocking until GHAS/code scanning is enabled)
+        if: github.event.repository.visibility == 'public'
+        name: CodeQL
         runs-on: ubuntu-latest
-        # CodeQL requires Code Scanning to be enabled. On a private repo this
-        # needs GitHub Advanced Security or making the repo public. Each step
-        # is set to continue-on-error so the job reports success until GHAS is
-        # turned on — see docs/security-scanning.md.
-        # TODO(security): remove continue-on-error before making this a required check.
+        # On private repositories this workflow skips CodeQL unless the repository
+        # is made public or a separate GHAS-enabled workflow is introduced.
         permissions:
             contents: read
             security-events: write
@@ -57,18 +55,15 @@ jobs:
 
             - name: Initialize CodeQL
               uses: github/codeql-action/init@v3
-              continue-on-error: true
               with:
                   languages: javascript-typescript
                   queries: security-extended,security-and-quality
 
             - name: Autobuild
               uses: github/codeql-action/autobuild@v3
-              continue-on-error: true
 
             - name: Analyze
               uses: github/codeql-action/analyze@v3
-              continue-on-error: true
               with:
                   category: '/language:javascript-typescript'
 

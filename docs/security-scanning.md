@@ -65,8 +65,9 @@ These are GitHub-native — no extra accounts.
 `Settings` → `Branches` → branch protection for `main`:
 
 - [ ] Require a pull request before merging
-- [ ] Require status checks before merging (select: `quality`, `codeql`,
-      `semgrep`, `dependencies`, `secrets`, `trivy`)
+- [ ] Require status checks before merging (select: `quality`, `semgrep`,
+      `dependencies`, `secrets`, `trivy`, and `codeql` only when the repo is
+      public or a GHAS-backed private workflow exists)
 - [ ] Require branches to be up to date before merging
 - [ ] Disallow force pushes
 - [ ] Require linear history (optional)
@@ -140,19 +141,18 @@ Specific to this Workers/Hono/D1/Vectorize stack:
 ## CodeQL on private repositories
 
 CodeQL needs **Code Scanning** enabled in repo settings. On a private repo
-this requires GitHub Advanced Security (paid) or making the repo public
-(free).
+this requires GitHub Advanced Security (paid) or a separate GHAS-enabled
+workflow.
 
-The `codeql` job is set to `continue-on-error: true` so it does not block
-PRs while disabled. To enable:
+The current workflow only runs the `codeql` job when the repository is
+public. To enable blocking CodeQL coverage on a private repository:
 
-1. Make the repository public, **or** turn on GHAS for the repo/org.
+1. Turn on GHAS for the repo/org.
 2. `Settings` → `Code security` → enable Code scanning (advanced setup,
-   pointing at this workflow).
-3. Remove `continue-on-error: true` from the `codeql` job in
-   `.github/workflows/security.yml` so it becomes a required check.
+   pointing at a GHAS-backed CodeQL workflow).
+3. Make that private-repo workflow a required check in branch protection.
 
-Until then, Semgrep OSS provides static analysis coverage.
+Until then, Semgrep OSS provides static analysis coverage in this baseline.
 
 ## Follow-ups not yet automated
 

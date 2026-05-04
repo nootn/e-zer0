@@ -40,6 +40,7 @@ export function isValidRedirectUri(redirectUri: string): boolean {
         const isLocalhostHttp =
             url.protocol === 'http:' && ['127.0.0.1', 'localhost', '::1'].includes(url.hostname.toLowerCase());
 
+        // RFC 8252 forbids userinfo in redirect URIs, even for native app callbacks.
         return (url.protocol === 'https:' || isLocalhostHttp) && url.username === '' && url.password === '';
     } catch {
         return false;

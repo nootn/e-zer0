@@ -281,11 +281,12 @@ async function createEnv(
     clients: TestClientRecord[] = [],
     authCodes: TestAuthCodeRecord[] = [],
     emailAccounts: TestEmailAccountRecord[] = [],
-    clientAccounts: TestMcpClientAccountRecord[] = []
+    clientAccounts: TestMcpClientAccountRecord[] = [],
+    rateLimiter: KVNamespace = new FakeKvNamespace() as unknown as KVNamespace
 ) {
     return {
         DB: new FakeD1Database(clients, authCodes, emailAccounts, clientAccounts) as unknown as D1Database,
-        RATE_LIMITER: new FakeKvNamespace() as unknown as KVNamespace,
+        RATE_LIMITER: rateLimiter,
         JWT_SECRET: 'test-jwt-secret',
     };
 }
@@ -767,6 +768,47 @@ describe('MCP OAuth integration routes', () => {
                 headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.25' },
                 body: JSON.stringify({
                     client_name: 'Blocked Client',
+                    redirect_uris: ['https://client.example/callback'],
+                }),
+            }),
+            env
+        );
+
+        expect(blockedResponse.status).toBe(429);
+    });
+
+    it('enforces a daily registration cap even after burst windows reset', async () => {
+        const fakeKv = new FakeKvNamespace();
+        const env = await createEnv([], [], [], [], fakeKv as unknown as KVNamespace);
+
+        for (let index = 0; index < 25; index++) {
+            if (index > 0 && index % 5 === 0) {
+                await fakeKv.delete('rate_limit:register:burst:203.0.113.50');
+            }
+
+            const response = await app.fetch(
+                new Request('https://example.com/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '203.0.113.50' },
+                    body: JSON.stringify({
+                        client_name: `Client ${index}`,
+                        redirect_uris: ['https://client.example/callback'],
+                    }),
+                }),
+                env
+            );
+
+            expect(response.status).toBe(201);
+        }
+
+        await fakeKv.delete('rate_limit:register:burst:203.0.113.50');
+
+        const blockedResponse = await app.fetch(
+            new Request('https://example.com/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '203.0.113.50' },
+                body: JSON.stringify({
+                    client_name: 'Daily Cap Client',
                     redirect_uris: ['https://client.example/callback'],
                 }),
             }),
