@@ -315,6 +315,7 @@ agents.post('/create', async (c) => {
             token_endpoint_auth_method
         ) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`
     )
+        // UI-created agents stay on the legacy client_credentials-only flow; browser OAuth DCR clients come from /register.
         .bind(name, clientId, secretHash, salt, '[]', '["client_credentials"]', 'client_secret_post')
         .first<{ id: number }>();
 

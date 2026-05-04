@@ -159,7 +159,7 @@ mcp.post('/token', async (c) => {
         return c.json({ error: 'invalid_client' }, 401);
     }
 
-    const tokenEndpointAuthMethod = client.token_endpoint_auth_method ?? 'client_secret_post';
+    const tokenEndpointAuthMethod = client.token_endpoint_auth_method;
     const parsedGrantTypes = parseStoredJsonArray(client.grant_types);
     const registeredGrantTypes =
         parsedGrantTypes.length > 0

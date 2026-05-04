@@ -228,6 +228,21 @@ class FakePreparedStatement {
             return { success: true };
         }
 
+        if (this.sql.includes('DELETE FROM mcp_clients')) {
+            const staleCutoff = this.boundValues[0];
+            const cutoffTime = new Date(staleCutoff as string).getTime();
+            this.db.clients.splice(
+                0,
+                this.db.clients.length,
+                ...this.db.clients.filter((client) => {
+                    const isAuthCodeClient = client.grant_types?.includes('"authorization_code"') ?? false;
+                    const isStale = new Date(client.created_at).getTime() < cutoffTime;
+                    return !(client.is_active === 1 && client.last_used_at === null && isStale && isAuthCodeClient);
+                })
+            );
+            return { success: true };
+        }
+
         if (this.sql.includes('INSERT INTO mcp_clients')) {
             const [name, clientId, secretHash, salt, redirectUris, grantTypes, tokenEndpointAuthMethod] =
                 this.boundValues;
@@ -849,5 +864,94 @@ describe('MCP OAuth integration routes', () => {
 
         expect(response.status).toBe(400);
         await expect(response.json()).resolves.toMatchObject({ error: 'unsupported_grant_type' });
+    });
+
+    it('rejects dynamic client registrations with malformed metadata types', async () => {
+        const env = await createEnv();
+
+        const response = await app.fetch(
+            new Request('https://example.com/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    client_name: ['OpenAI Codex'],
+                    redirect_uris: ['https://client.example/callback'],
+                }),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toMatchObject({ error: 'invalid_client_metadata' });
+    });
+
+    it('rejects dynamic client registrations whose redirect URI contains a fragment', async () => {
+        const env = await createEnv();
+
+        const response = await app.fetch(
+            new Request('https://example.com/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    client_name: 'Fragment Client',
+                    redirect_uris: ['https://client.example/callback#fragment'],
+                }),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toMatchObject({ error: 'invalid_client_metadata' });
+    });
+
+    it('prunes stale unused dynamic clients before issuing a new registration', async () => {
+        const staleClient: TestClientRecord = {
+            id: 21,
+            name: 'Stale Dynamic Client',
+            client_id: 'ez_stale_dynamic',
+            secret_hash: '',
+            salt: '',
+            is_active: 1,
+            last_used_at: null,
+            created_at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+            redirect_uris: JSON.stringify(['https://old-client.example/callback']),
+            grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+            token_endpoint_auth_method: 'none',
+        };
+        const preservedAgent: TestClientRecord = {
+            id: 22,
+            name: 'UI Agent',
+            client_id: 'ez_ui_agent',
+            secret_hash: 'hash',
+            salt: 'salt',
+            is_active: 1,
+            last_used_at: null,
+            created_at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+            redirect_uris: '[]',
+            grant_types: JSON.stringify(['client_credentials']),
+            token_endpoint_auth_method: 'client_secret_post',
+        };
+        const fakeDb = new FakeD1Database([staleClient, preservedAgent]);
+        const env = {
+            DB: fakeDb as unknown as D1Database,
+            RATE_LIMITER: new FakeKvNamespace() as unknown as KVNamespace,
+            JWT_SECRET: 'test-jwt-secret',
+        };
+
+        const response = await app.fetch(
+            new Request('https://example.com/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    client_name: 'Fresh Dynamic Client',
+                    redirect_uris: ['https://client.example/callback'],
+                }),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(201);
+        expect(fakeDb.clients.some((client) => client.client_id === staleClient.client_id)).toBe(false);
+        expect(fakeDb.clients.some((client) => client.client_id === preservedAgent.client_id)).toBe(true);
     });
 });

@@ -1,5 +1,8 @@
+import { z } from 'zod';
+
 export const ACCESS_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
 export const REFRESH_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30;
+export const MAX_DYNAMIC_CLIENT_NAME_LENGTH = 200;
 
 export const SUPPORTED_GRANT_TYPES = ['authorization_code', 'client_credentials', 'refresh_token'] as const;
 export const SUPPORTED_TOKEN_ENDPOINT_AUTH_METHODS = ['none', 'client_secret_post'] as const;
@@ -7,13 +10,17 @@ export const SUPPORTED_CODE_CHALLENGE_METHODS = ['S256'] as const;
 
 export type SupportedTokenEndpointAuthMethod = (typeof SUPPORTED_TOKEN_ENDPOINT_AUTH_METHODS)[number];
 
-export interface DynamicClientRegistrationRequest {
-    client_name?: string;
-    grant_types?: string[];
-    redirect_uris?: string[];
-    response_types?: string[];
-    token_endpoint_auth_method?: string;
-}
+const dynamicClientRegistrationRequestSchema = z
+    .object({
+        client_name: z.string().optional(),
+        grant_types: z.array(z.string()).optional(),
+        redirect_uris: z.array(z.string()).optional(),
+        response_types: z.array(z.string()).optional(),
+        token_endpoint_auth_method: z.string().optional(),
+    })
+    .passthrough();
+
+export type DynamicClientRegistrationRequest = z.infer<typeof dynamicClientRegistrationRequestSchema>;
 
 export interface NormalizedDynamicClientRegistration {
     clientName: string;
@@ -41,7 +48,13 @@ export function isValidRedirectUri(redirectUri: string): boolean {
             url.protocol === 'http:' && ['127.0.0.1', 'localhost', '::1'].includes(url.hostname.toLowerCase());
 
         // RFC 8252 forbids userinfo in redirect URIs, even for native app callbacks.
-        return (url.protocol === 'https:' || isLocalhostHttp) && url.username === '' && url.password === '';
+        // RFC 6749 §3.1.2 also forbids fragments in redirect URIs.
+        return (
+            (url.protocol === 'https:' || isLocalhostHttp) &&
+            url.username === '' &&
+            url.password === '' &&
+            url.hash === ''
+        );
     } catch {
         return false;
     }
@@ -63,6 +76,17 @@ export function requiresClientSecret(tokenEndpointAuthMethod: string | null | un
     return (tokenEndpointAuthMethod ?? 'client_secret_post') === 'client_secret_post';
 }
 
+export function parseDynamicClientRegistrationRequest(payload: unknown): DynamicClientRegistrationRequest {
+    const parsed = dynamicClientRegistrationRequestSchema.safeParse(payload);
+    if (parsed.success) {
+        return parsed.data;
+    }
+
+    const issue = parsed.error.issues[0];
+    const path = issue?.path.length ? issue.path.join('.') : 'request body';
+    throw new Error(`${path} has an invalid type`);
+}
+
 export function normalizeDynamicClientRegistration(
     payload: DynamicClientRegistrationRequest
 ): NormalizedDynamicClientRegistration {
@@ -74,6 +98,10 @@ export function normalizeDynamicClientRegistration(
     const responseTypes = Array.from(new Set(payload.response_types?.length ? payload.response_types : ['code']));
     const tokenEndpointAuthMethod = (payload.token_endpoint_auth_method ??
         'client_secret_post') as SupportedTokenEndpointAuthMethod;
+
+    if (clientName.length > MAX_DYNAMIC_CLIENT_NAME_LENGTH) {
+        throw new Error(`client_name must be ${MAX_DYNAMIC_CLIENT_NAME_LENGTH} characters or fewer`);
+    }
 
     if (redirectUris.length === 0) {
         throw new Error('redirect_uris must contain at least one redirect URI');

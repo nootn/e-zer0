@@ -1,12 +1,27 @@
 import { Hono } from 'hono';
 import type { Env } from '../types';
 import { generateClientId, generateClientSecret, generateSalt, hashPassword } from '../lib/crypto';
-import { normalizeDynamicClientRegistration } from '../lib/mcp-oauth';
+import { normalizeDynamicClientRegistration, parseDynamicClientRegistrationRequest } from '../lib/mcp-oauth';
 import { checkRateLimit, incrementRateLimit } from '../lib/rate-limit';
 
 const register = new Hono<{ Bindings: Env }>();
 const REGISTER_BURST_LIMIT = 5;
 const REGISTER_DAILY_LIMIT = 25;
+const STALE_DYNAMIC_CLIENT_TTL_DAYS = 7;
+
+async function pruneStaleDynamicClients(env: Env) {
+    const staleCutoff = new Date(Date.now() - STALE_DYNAMIC_CLIENT_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+    await env.DB.prepare(
+        `DELETE FROM mcp_clients
+         WHERE is_active = 1
+           AND last_used_at IS NULL
+           AND datetime(created_at) < datetime(?)
+           AND grant_types LIKE '%"authorization_code"%'`
+    )
+        .bind(staleCutoff)
+        .run();
+}
 
 register.post('/', async (c) => {
     const ip = c.req.header('CF-Connecting-IP') || 'unknown';
@@ -42,11 +57,14 @@ register.post('/', async (c) => {
     }
 
     try {
-        const registration = normalizeDynamicClientRegistration(body as Record<string, unknown>);
+        const metadata = parseDynamicClientRegistrationRequest(body);
+        const registration = normalizeDynamicClientRegistration(metadata);
         const clientId = generateClientId();
         let clientSecret: string | undefined;
         let secretHash = '';
         let salt = '';
+
+        await pruneStaleDynamicClients(c.env);
 
         if (registration.tokenEndpointAuthMethod === 'client_secret_post') {
             clientSecret = generateClientSecret();
@@ -92,11 +110,11 @@ register.post('/', async (c) => {
             },
             201
         );
-    } catch (error: any) {
+    } catch (error: unknown) {
         return c.json(
             {
                 error: 'invalid_client_metadata',
-                error_description: error?.message || 'Client metadata validation failed.',
+                error_description: error instanceof Error ? error.message : 'Client metadata validation failed.',
             },
             400
         );

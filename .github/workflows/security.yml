@@ -39,12 +39,41 @@ jobs:
             - name: Test
               run: npm test
 
+    codeql-eligibility:
+        name: CodeQL eligibility
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+        outputs:
+            run_codeql: ${{ steps.visibility.outputs.run_codeql }}
+        steps:
+            - name: Check repository visibility
+              id: visibility
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
+                  GITHUB_API_URL: ${{ github.api_url }}
+                  GITHUB_REPOSITORY: ${{ github.repository }}
+              run: |
+                  set -euo pipefail
+                  visibility="$(curl -fsSL \
+                    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                    -H "Accept: application/vnd.github+json" \
+                    "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}" \
+                    | python3 -c "import json,sys; print(json.load(sys.stdin)['visibility'])")"
+
+                  if [ "${visibility}" = "public" ]; then
+                    echo "run_codeql=true" >> "${GITHUB_OUTPUT}"
+                  else
+                    echo "run_codeql=false" >> "${GITHUB_OUTPUT}"
+                  fi
+
     codeql:
-        if: github.event.repository.visibility == 'public'
+        if: needs.codeql-eligibility.outputs.run_codeql == 'true'
+        needs: codeql-eligibility
         name: CodeQL
         runs-on: ubuntu-latest
-        # On private repositories this workflow skips CodeQL unless the repository
-        # is made public or a separate GHAS-enabled workflow is introduced.
+        # Private repositories without GHAS skip CodeQL. Visibility is checked
+        # via the repo API so schedule/workflow_dispatch stay accurate too.
         permissions:
             contents: read
             security-events: write
@@ -77,6 +106,8 @@ jobs:
               uses: actions/checkout@v4
 
             - name: Run Semgrep
+              id: semgrep_scan
+              continue-on-error: true
               run: |
                   semgrep scan \
                     --config p/typescript \
@@ -84,8 +115,20 @@ jobs:
                     --config p/nodejs \
                     --config p/owasp-top-ten \
                     --severity ERROR \
+                    --sarif \
+                    --output semgrep.sarif \
                     --error \
                     --metrics=off
+
+            - name: Upload Semgrep SARIF
+              if: always()
+              uses: github/codeql-action/upload-sarif@v3
+              with:
+                  sarif_file: semgrep.sarif
+
+            - name: Fail on Semgrep findings
+              if: steps.semgrep_scan.outcome == 'failure'
+              run: exit 1
 
     dependencies:
         name: Dependency scanning
@@ -111,9 +154,18 @@ jobs:
               run: |
                   set -euo pipefail
                   OSV_VERSION=2.3.6
-                  curl -sSL "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64" \
-                    -o /tmp/osv-scanner
-                  sudo install -m 0755 /tmp/osv-scanner /usr/local/bin/osv-scanner
+                  OSV_ASSET="osv-scanner_linux_amd64"
+                  OSV_TMP_DIR="$(mktemp -d)"
+                  trap 'rm -rf "${OSV_TMP_DIR}"' EXIT
+                  curl -fsSL "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/${OSV_ASSET}" \
+                    -o "${OSV_TMP_DIR}/${OSV_ASSET}"
+                  curl -fsSL "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_SHA256SUMS" \
+                    -o "${OSV_TMP_DIR}/osv-scanner_SHA256SUMS"
+                  (
+                    cd "${OSV_TMP_DIR}"
+                    grep "  ${OSV_ASSET}\$" osv-scanner_SHA256SUMS | sha256sum -c -
+                  )
+                  sudo install -m 0755 "${OSV_TMP_DIR}/${OSV_ASSET}" /usr/local/bin/osv-scanner
                   osv-scanner --version
 
             - name: OSV Scanner
@@ -133,9 +185,20 @@ jobs:
             # directly instead — same engine, no license, no API calls.
             - name: Install Gitleaks
               run: |
+                  set -euo pipefail
                   GITLEAKS_VERSION=8.21.2
-                  curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-                    | sudo tar -xz -C /usr/local/bin gitleaks
+                  GITLEAKS_ASSET="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+                  GITLEAKS_TMP_DIR="$(mktemp -d)"
+                  trap 'rm -rf "${GITLEAKS_TMP_DIR}"' EXIT
+                  curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${GITLEAKS_ASSET}" \
+                    -o "${GITLEAKS_TMP_DIR}/${GITLEAKS_ASSET}"
+                  curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" \
+                    -o "${GITLEAKS_TMP_DIR}/gitleaks_checksums.txt"
+                  (
+                    cd "${GITLEAKS_TMP_DIR}"
+                    grep " ${GITLEAKS_ASSET}\$" gitleaks_checksums.txt | sha256sum -c -
+                    sudo tar -xzf "${GITLEAKS_ASSET}" -C /usr/local/bin gitleaks
+                  )
                   gitleaks version
 
             - name: Run Gitleaks
@@ -151,22 +214,40 @@ jobs:
             - name: Install Trivy
               run: |
                   set -euo pipefail
-                  sudo apt-get update -qq
-                  sudo apt-get install -y --no-install-recommends wget gnupg lsb-release
-                  wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
-                    | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-                  echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
-                    | sudo tee /etc/apt/sources.list.d/trivy.list
-                  sudo apt-get update -qq
-                  sudo apt-get install -y trivy
+                  TRIVY_VERSION=0.69.3
+                  TRIVY_ASSET="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+                  TRIVY_TMP_DIR="$(mktemp -d)"
+                  trap 'rm -rf "${TRIVY_TMP_DIR}"' EXIT
+                  curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${TRIVY_ASSET}" \
+                    -o "${TRIVY_TMP_DIR}/${TRIVY_ASSET}"
+                  curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_checksums.txt" \
+                    -o "${TRIVY_TMP_DIR}/trivy_checksums.txt"
+                  (
+                    cd "${TRIVY_TMP_DIR}"
+                    grep " ${TRIVY_ASSET}\$" trivy_checksums.txt | sha256sum -c -
+                    sudo tar -xzf "${TRIVY_ASSET}" -C /usr/local/bin trivy
+                  )
                   trivy --version
 
             - name: Run Trivy fs scan
+              id: trivy_scan
+              continue-on-error: true
               run: |
                   trivy fs \
                     --severity CRITICAL,HIGH \
                     --exit-code 1 \
                     --ignore-unfixed \
                     --skip-dirs node_modules,.wrangler \
-                    --format table \
+                    --format sarif \
+                    --output trivy.sarif \
                     .
+
+            - name: Upload Trivy SARIF
+              if: always()
+              uses: github/codeql-action/upload-sarif@v3
+              with:
+                  sarif_file: trivy.sarif
+
+            - name: Fail on Trivy findings
+              if: steps.trivy_scan.outcome == 'failure'
+              run: exit 1

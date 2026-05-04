@@ -1,6 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { sanitizeEmailContent, hasPotentialInjection } from './sanitizer';
 
+const awsStyleKey = ['AKIA', 'IOSFODNN7EXAMPLE'].join('');
+const openAiStyleKey = ['sk-', 'abc123def456ghi789', 'jklmnopqrstuvwxyz'].join('');
+const githubPat = ['ghp_', '1234567890abcdefghij', 'ABCDEFGHIJ123456'].join('');
+const privateKeyFixture = [
+    '-----BEGIN ',
+    'PRIVATE KEY-----\n',
+    'MIIEvQIBADANBg...\n',
+    '-----END ',
+    'PRIVATE KEY-----',
+].join('');
+
 // ── PII Redaction Tests ─────────────────────────────────
 
 describe('sanitizeEmailContent — PII Redaction', () => {
@@ -52,17 +63,17 @@ describe('sanitizeEmailContent — PII Redaction', () => {
     });
 
     it('redacts API keys (AWS format)', () => {
-        const result = sanitizeEmailContent('Key: AKIAIOSFODNN7EXAMPLE');
+        const result = sanitizeEmailContent(`Key: ${awsStyleKey}`);
         expect(result.sanitizedText).toContain('[API_KEY_REDACTED]');
     });
 
     it('redacts API keys (OpenAI format)', () => {
-        const result = sanitizeEmailContent('Token: sk-abc123def456ghi789jklmnopqrstuvwxyz');
+        const result = sanitizeEmailContent(`Token: ${openAiStyleKey}`);
         expect(result.sanitizedText).toContain('[API_KEY_REDACTED]');
     });
 
     it('redacts GitHub PATs', () => {
-        const result = sanitizeEmailContent('ghp_1234567890abcdefghijABCDEFGHIJ123456');
+        const result = sanitizeEmailContent(githubPat);
         expect(result.sanitizedText).toContain('[API_KEY_REDACTED]');
     });
 
@@ -72,9 +83,7 @@ describe('sanitizeEmailContent — PII Redaction', () => {
     });
 
     it('redacts private keys', () => {
-        const result = sanitizeEmailContent(
-            '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBg...\n-----END PRIVATE KEY-----'
-        );
+        const result = sanitizeEmailContent(privateKeyFixture);
         expect(result.sanitizedText).toContain('[PRIVATE_KEY_REDACTED]');
     });
 

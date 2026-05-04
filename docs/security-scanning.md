@@ -8,14 +8,14 @@ or in GitHub Actions — no SaaS signup required.
 `.github/workflows/security.yml` runs on every PR, push to `main`, weekly
 (Sunday 20:00 UTC), and on manual dispatch.
 
-| Job            | Tool          | Purpose                                                |
-| -------------- | ------------- | ------------------------------------------------------ |
-| `quality`      | tsc, prettier, vitest | Format, typecheck, tests                       |
-| `codeql`       | GitHub CodeQL | TypeScript/JavaScript static security analysis (see GHAS note below) |
-| `semgrep`      | Semgrep OSS   | Pattern-based source scanning (TS/JS/Node/OWASP top10) |
-| `dependencies` | npm audit + OSV Scanner | Known-CVE scanning across the dep tree       |
-| `secrets`      | Gitleaks      | Secret scanning of full git history                    |
-| `trivy`        | Trivy fs      | Filesystem + lockfile + IaC scan (HIGH/CRITICAL)       |
+| Job            | Tool                    | Purpose                                                                                   |
+| -------------- | ----------------------- | ----------------------------------------------------------------------------------------- |
+| `quality`      | tsc, prettier, vitest   | Format, typecheck, tests                                                                  |
+| `codeql`       | GitHub CodeQL           | TypeScript/JavaScript static security analysis (see GHAS note below)                      |
+| `semgrep`      | Semgrep OSS             | Pattern-based source scanning (TS/JS/Node/OWASP top10), uploaded as SARIF                 |
+| `dependencies` | npm audit + OSV Scanner | Known-CVE scanning across the dep tree                                                    |
+| `secrets`      | Gitleaks                | Secret scanning of full git history                                                       |
+| `trivy`        | Trivy fs                | Repository filesystem scan for lockfiles/manifests/IaC (HIGH/CRITICAL), uploaded as SARIF |
 
 `.github/workflows/dast.yml` runs OWASP ZAP Baseline on demand against a
 deployed URL (manual dispatch only).
@@ -39,8 +39,8 @@ npm run security:trivy          # needs `trivy`        (https://aquasecurity.git
 npm run security                # runs the lot
 ```
 
-CI installs each scanner via official GitHub Actions, so you do **not** need
-any of these locally to pass PR checks.
+CI installs each scanner directly from pinned upstream releases with checksum
+verification, so you do **not** need any of these locally to pass PR checks.
 
 ### Suggested install (macOS/Linux)
 
@@ -107,7 +107,8 @@ Notes:
 - Failing typecheck or tests
 - CRITICAL/HIGH dependency CVEs in runtime deps
 - High-confidence CodeQL or Semgrep findings (ERROR severity)
-- CRITICAL/HIGH Trivy findings affecting runtime/deployment
+- CRITICAL/HIGH Trivy findings in repo-tracked runtime/deployment artifacts
+  such as lockfiles, manifests, Dockerfiles, or IaC/config
 
 ### Do not auto-block on
 
@@ -144,8 +145,9 @@ CodeQL needs **Code Scanning** enabled in repo settings. On a private repo
 this requires GitHub Advanced Security (paid) or a separate GHAS-enabled
 workflow.
 
-The current workflow only runs the `codeql` job when the repository is
-public. To enable blocking CodeQL coverage on a private repository:
+The current workflow checks repository visibility via the GitHub repo API and
+only runs `codeql` when the repository is public. To enable blocking CodeQL
+coverage on a private repository:
 
 1. Turn on GHAS for the repo/org.
 2. `Settings` → `Code security` → enable Code scanning (advanced setup,
