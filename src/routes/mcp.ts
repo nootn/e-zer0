@@ -5,7 +5,13 @@ import { verifyPassword } from '../lib/crypto';
 import { createMcpServer } from '../mcp/server';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { checkRateLimit, incrementRateLimit, clearRateLimit } from '../lib/rate-limit';
-import { ACCESS_TOKEN_TTL_SECONDS, REFRESH_TOKEN_TTL_SECONDS } from '../lib/mcp-oauth';
+import {
+    ACCESS_TOKEN_TTL_SECONDS,
+    REFRESH_TOKEN_TTL_SECONDS,
+    parseStoredJsonArray,
+    requiresClientSecret,
+    requiresPkce,
+} from '../lib/mcp-oauth';
 
 const mcp = new Hono<{ Bindings: Env }>();
 
@@ -153,16 +159,33 @@ mcp.post('/token', async (c) => {
         return c.json({ error: 'invalid_client' }, 401);
     }
 
-    // Validate secret if provided, or if client_credentials requires it
-    if (clientSecret) {
+    const tokenEndpointAuthMethod = client.token_endpoint_auth_method ?? 'client_secret_post';
+    const registeredGrantTypes = parseStoredJsonArray(client.grant_types);
+    const supportsGrantType = (candidate: string) =>
+        registeredGrantTypes.length === 0 || registeredGrantTypes.includes(candidate);
+
+    if (!supportsGrantType(grantType)) {
+        await incrementRateLimit(c.env.RATE_LIMITER, rlKey);
+        return c.json({ error: 'unsupported_grant_type' }, 400);
+    }
+
+    if (grantType === 'client_credentials' && !requiresClientSecret(tokenEndpointAuthMethod)) {
+        await incrementRateLimit(c.env.RATE_LIMITER, rlKey);
+        return c.json({ error: 'unsupported_grant_type' }, 400);
+    }
+
+    // Enforce the registered token endpoint auth method for all grants.
+    if (requiresClientSecret(tokenEndpointAuthMethod)) {
+        if (!clientSecret) {
+            await incrementRateLimit(c.env.RATE_LIMITER, rlKey);
+            return c.json({ error: 'invalid_client' }, 401);
+        }
+
         const valid = await verifyPassword(clientSecret, client.secret_hash, client.salt);
         if (!valid) {
             await incrementRateLimit(c.env.RATE_LIMITER, rlKey);
             return c.json({ error: 'invalid_client' }, 401);
         }
-    } else if (grantType === 'client_credentials') {
-        await incrementRateLimit(c.env.RATE_LIMITER, rlKey);
-        return c.json({ error: 'invalid_client' }, 401);
     }
 
     // 2. Grant validations
@@ -182,6 +205,11 @@ mcp.post('/token', async (c) => {
         }
 
         if (authCode.redirect_uri !== redirectUri) {
+            await incrementRateLimit(c.env.RATE_LIMITER, rlKey);
+            return c.json({ error: 'invalid_grant' }, 400);
+        }
+
+        if (requiresPkce(tokenEndpointAuthMethod) && !authCode.code_challenge) {
             await incrementRateLimit(c.env.RATE_LIMITER, rlKey);
             return c.json({ error: 'invalid_grant' }, 400);
         }
@@ -220,7 +248,7 @@ mcp.post('/token', async (c) => {
 
     const result: any = { access_token: token, token_type: 'Bearer', expires_in: ACCESS_TOKEN_TTL_SECONDS };
 
-    if (grantType === 'authorization_code' || grantType === 'refresh_token') {
+    if ((grantType === 'authorization_code' || grantType === 'refresh_token') && supportsGrantType('refresh_token')) {
         result.refresh_token = await signJwt(
             {
                 sub: client.client_id,

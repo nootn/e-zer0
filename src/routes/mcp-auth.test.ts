@@ -26,6 +26,29 @@ interface TestAuthCodeRecord {
     user_id: number;
 }
 
+interface TestEmailAccountRecord {
+    id: number;
+    alias: string;
+    email_address: string;
+    status: string;
+}
+
+interface TestMcpClientAccountRecord {
+    mcp_client_id: number;
+    email_account_id: number;
+}
+
+interface TestAdminUserRecord {
+    id: number;
+    username: string;
+}
+
+interface TestSessionRecord {
+    token: string;
+    user_id: number;
+    expires_at: string;
+}
+
 class FakeKvNamespace {
     private readonly store = new Map<string, string>();
 
@@ -47,7 +70,17 @@ class FakeD1Database {
 
     constructor(
         readonly clients: TestClientRecord[] = [],
-        readonly authCodes: TestAuthCodeRecord[] = []
+        readonly authCodes: TestAuthCodeRecord[] = [],
+        readonly emailAccounts: TestEmailAccountRecord[] = [],
+        readonly clientAccounts: TestMcpClientAccountRecord[] = [],
+        readonly adminUsers: TestAdminUserRecord[] = [{ id: 1, username: 'admin' }],
+        readonly sessions: TestSessionRecord[] = [
+            {
+                token: 'valid-session',
+                user_id: 1,
+                expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+            },
+        ]
     ) {}
 
     prepare(sql: string) {
@@ -70,6 +103,16 @@ class FakeD1Database {
         this.clients.push(row);
         return row;
     }
+
+    insertClientAccount(record: TestMcpClientAccountRecord) {
+        const exists = this.clientAccounts.some(
+            (row) => row.mcp_client_id === record.mcp_client_id && row.email_account_id === record.email_account_id
+        );
+
+        if (!exists) {
+            this.clientAccounts.push(record);
+        }
+    }
 }
 
 class FakePreparedStatement {
@@ -87,7 +130,26 @@ class FakePreparedStatement {
 
     async first<T>() {
         if (this.sql.includes('SELECT COUNT(*) as count FROM admin_users')) {
-            return { count: 1 } as T;
+            return { count: this.db.adminUsers.length } as T;
+        }
+
+        if (this.sql.includes('FROM sessions s') && this.sql.includes('JOIN admin_users u')) {
+            const token = this.boundValues[0];
+            const session = this.db.sessions.find((row) => row.token === token);
+            if (!session) {
+                return null as T;
+            }
+
+            const adminUser = this.db.adminUsers.find((row) => row.id === session.user_id);
+            if (!adminUser) {
+                return null as T;
+            }
+
+            return {
+                user_id: session.user_id,
+                expires_at: session.expires_at,
+                username: adminUser.username,
+            } as T;
         }
 
         if (this.sql.includes('SELECT * FROM mcp_clients WHERE client_id = ? AND is_active = 1')) {
@@ -100,6 +162,12 @@ class FakePreparedStatement {
             const clientId = this.boundValues[0];
             const client = this.db.clients.find((row) => row.client_id === clientId);
             return (client ? { is_active: client.is_active } : null) as T;
+        }
+
+        if (this.sql.includes('SELECT COUNT(*) as count FROM mcp_client_accounts WHERE mcp_client_id = ?')) {
+            const clientDbId = this.boundValues[0];
+            const count = this.db.clientAccounts.filter((row) => row.mcp_client_id === clientDbId).length;
+            return { count } as T;
         }
 
         if (
@@ -125,6 +193,29 @@ class FakePreparedStatement {
             if (client) {
                 client.last_used_at = new Date().toISOString();
             }
+            return { success: true };
+        }
+
+        if (this.sql.includes('INSERT INTO oauth_auth_codes')) {
+            const [id, clientId, redirectUri, codeChallenge, codeChallengeMethod, expiresAt, userId] = this.boundValues;
+            this.db.authCodes.push({
+                id: id as string,
+                client_id: clientId as string,
+                redirect_uri: redirectUri as string,
+                code_challenge: (codeChallenge as string | null) ?? null,
+                code_challenge_method: (codeChallengeMethod as string | null) ?? null,
+                expires_at: expiresAt as string,
+                user_id: userId as number,
+            });
+            return { success: true };
+        }
+
+        if (this.sql.includes('INSERT OR IGNORE INTO mcp_client_accounts')) {
+            const [clientDbId, emailAccountId] = this.boundValues;
+            this.db.insertClientAccount({
+                mcp_client_id: clientDbId as number,
+                email_account_id: emailAccountId as number,
+            });
             return { success: true };
         }
 
@@ -156,13 +247,44 @@ class FakePreparedStatement {
     }
 
     async all<T>() {
+        if (this.sql.includes('SELECT id FROM email_accounts WHERE status = ?')) {
+            const status = this.boundValues[0];
+            return {
+                results: this.db.emailAccounts.filter((row) => row.status === status).map((row) => ({ id: row.id })),
+            } as T;
+        }
+
         throw new Error(`Unhandled all() SQL in test fake: ${this.sql}`);
     }
 }
 
-async function createEnv(clients: TestClientRecord[] = [], authCodes: TestAuthCodeRecord[] = []) {
+async function signTestJwt(payload: Record<string, unknown>, secret: string) {
+    const encoder = new TextEncoder();
+    const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).replace(/=/g, '');
+    const body = btoa(JSON.stringify(payload)).replace(/=/g, '');
+    const data = `${header}.${body}`;
+
+    const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [
+        'sign',
+    ]);
+
+    const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
+    const sigStr = btoa(String.fromCharCode(...new Uint8Array(signature)))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+
+    return `${data}.${sigStr}`;
+}
+
+async function createEnv(
+    clients: TestClientRecord[] = [],
+    authCodes: TestAuthCodeRecord[] = [],
+    emailAccounts: TestEmailAccountRecord[] = [],
+    clientAccounts: TestMcpClientAccountRecord[] = []
+) {
     return {
-        DB: new FakeD1Database(clients, authCodes) as unknown as D1Database,
+        DB: new FakeD1Database(clients, authCodes, emailAccounts, clientAccounts) as unknown as D1Database,
         RATE_LIMITER: new FakeKvNamespace() as unknown as KVNamespace,
         JWT_SECRET: 'test-jwt-secret',
     };
@@ -206,6 +328,54 @@ describe('MCP OAuth integration routes', () => {
         expect(body.token_endpoint_auth_method).toBe('none');
         expect(body.redirect_uris).toEqual(['http://127.0.0.1:43111/callback']);
         expect(body.client_secret).toBeUndefined();
+    });
+
+    it('rejects public authorization-code exchange when the auth code was issued without PKCE', async () => {
+        const env = await createEnv(
+            [
+                {
+                    id: 7,
+                    name: 'OpenAI Codex',
+                    client_id: 'ez_public',
+                    secret_hash: '',
+                    salt: '',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: JSON.stringify(['http://127.0.0.1:43111/callback']),
+                    grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+                    token_endpoint_auth_method: 'none',
+                },
+            ],
+            [
+                {
+                    id: 'auth-code-without-pkce',
+                    client_id: 'ez_public',
+                    redirect_uri: 'http://127.0.0.1:43111/callback',
+                    code_challenge: null,
+                    code_challenge_method: null,
+                    expires_at: new Date(Date.now() + 60_000).toISOString(),
+                    user_id: 1,
+                },
+            ]
+        );
+
+        const response = await app.fetch(
+            new Request('https://example.com/mcp/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    grant_type: 'authorization_code',
+                    client_id: 'ez_public',
+                    code: 'auth-code-without-pkce',
+                    redirect_uri: 'http://127.0.0.1:43111/callback',
+                }),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toMatchObject({ error: 'invalid_grant' });
     });
 
     it('rejects authorization-code exchange when redirect_uri does not match the original authorization request', async () => {
@@ -256,6 +426,294 @@ describe('MCP OAuth integration routes', () => {
         await expect(response.json()).resolves.toMatchObject({ error: 'invalid_grant' });
     });
 
+    it('requires client_secret for confidential authorization-code exchange', async () => {
+        const salt = generateSalt();
+        const secretHash = await hashPassword('super-secret', salt);
+        const codeVerifier = 'pkce-verifier';
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier));
+        const codeChallenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '');
+        const env = await createEnv(
+            [
+                {
+                    id: 8,
+                    name: 'Confidential Client',
+                    client_id: 'ez_confidential',
+                    secret_hash: secretHash,
+                    salt,
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: JSON.stringify(['https://client.example/callback']),
+                    grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+                    token_endpoint_auth_method: 'client_secret_post',
+                },
+            ],
+            [
+                {
+                    id: 'confidential-auth-code',
+                    client_id: 'ez_confidential',
+                    redirect_uri: 'https://client.example/callback',
+                    code_challenge: codeChallenge,
+                    code_challenge_method: 'S256',
+                    expires_at: new Date(Date.now() + 60_000).toISOString(),
+                    user_id: 1,
+                },
+            ]
+        );
+
+        const response = await app.fetch(
+            new Request('https://example.com/mcp/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    grant_type: 'authorization_code',
+                    client_id: 'ez_confidential',
+                    code: 'confidential-auth-code',
+                    code_verifier: codeVerifier,
+                    redirect_uri: 'https://client.example/callback',
+                }),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(401);
+        await expect(response.json()).resolves.toMatchObject({ error: 'invalid_client' });
+    });
+
+    it('requires client_secret for confidential refresh-token exchange', async () => {
+        const salt = generateSalt();
+        const secretHash = await hashPassword('super-secret', salt);
+        const refreshToken = await signTestJwt(
+            {
+                sub: 'ez_confidential',
+                name: 'Confidential Client',
+                type: 'refresh',
+                iat: Math.floor(Date.now() / 1000),
+                exp: Math.floor(Date.now() / 1000) + 60 * 60,
+            },
+            'test-jwt-secret'
+        );
+        const env = await createEnv([
+            {
+                id: 11,
+                name: 'Confidential Client',
+                client_id: 'ez_confidential',
+                secret_hash: secretHash,
+                salt,
+                is_active: 1,
+                last_used_at: null,
+                created_at: new Date().toISOString(),
+                redirect_uris: JSON.stringify(['https://client.example/callback']),
+                grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+                token_endpoint_auth_method: 'client_secret_post',
+            },
+        ]);
+
+        const response = await app.fetch(
+            new Request('https://example.com/mcp/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    grant_type: 'refresh_token',
+                    client_id: 'ez_confidential',
+                    refresh_token: refreshToken,
+                }),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(401);
+        await expect(response.json()).resolves.toMatchObject({ error: 'invalid_client' });
+    });
+
+    it('grants active email-account access on first authorization approval', async () => {
+        const fakeDb = new FakeD1Database(
+            [
+                {
+                    id: 15,
+                    name: 'OpenAI Codex',
+                    client_id: 'ez_public',
+                    secret_hash: '',
+                    salt: '',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: JSON.stringify(['http://127.0.0.1:43111/callback']),
+                    grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+                    token_endpoint_auth_method: 'none',
+                },
+            ],
+            [],
+            [
+                { id: 21, alias: 'Primary', email_address: 'primary@example.com', status: 'active' },
+                { id: 22, alias: 'Archive', email_address: 'archive@example.com', status: 'active' },
+                { id: 23, alias: 'Revoked', email_address: 'revoked@example.com', status: 'revoked' },
+            ]
+        );
+        const env = {
+            DB: fakeDb as unknown as D1Database,
+            RATE_LIMITER: new FakeKvNamespace() as unknown as KVNamespace,
+            JWT_SECRET: 'test-jwt-secret',
+        };
+
+        const response = await app.fetch(
+            new Request('https://example.com/authorize', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    Cookie: 'ezer0_session=valid-session',
+                },
+                body: new URLSearchParams({
+                    client_id: 'ez_public',
+                    redirect_uri: 'http://127.0.0.1:43111/callback',
+                    code_challenge: 'challenge',
+                    code_challenge_method: 'S256',
+                }),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(302);
+        expect(fakeDb.clientAccounts).toEqual([
+            { mcp_client_id: 15, email_account_id: 21 },
+            { mcp_client_id: 15, email_account_id: 22 },
+        ]);
+    });
+
+    it('does not auto-grant accounts to legacy zero-access agents during authorization', async () => {
+        const fakeDb = new FakeD1Database(
+            [
+                {
+                    id: 16,
+                    name: 'Legacy Zero Access Agent',
+                    client_id: 'ez_legacy_zero',
+                    secret_hash: 'secret-hash',
+                    salt: 'salt',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: null,
+                    grant_types: null,
+                    token_endpoint_auth_method: 'client_secret_post',
+                },
+            ],
+            [],
+            [
+                { id: 21, alias: 'Primary', email_address: 'primary@example.com', status: 'active' },
+                { id: 22, alias: 'Archive', email_address: 'archive@example.com', status: 'active' },
+            ]
+        );
+        const env = {
+            DB: fakeDb as unknown as D1Database,
+            RATE_LIMITER: new FakeKvNamespace() as unknown as KVNamespace,
+            JWT_SECRET: 'test-jwt-secret',
+        };
+
+        const response = await app.fetch(
+            new Request('https://example.com/authorize', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    Cookie: 'ezer0_session=valid-session',
+                },
+                body: new URLSearchParams({
+                    client_id: 'ez_legacy_zero',
+                    redirect_uri: 'https://legacy-agent.example/callback',
+                }),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(302);
+        expect(fakeDb.clientAccounts).toEqual([]);
+    });
+
+    it('does not mint or honor refresh tokens for clients without refresh_token grant', async () => {
+        const codeVerifier = 'pkce-verifier';
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier));
+        const codeChallenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=/g, '');
+        const env = await createEnv(
+            [
+                {
+                    id: 18,
+                    name: 'Short-lived Client',
+                    client_id: 'ez_no_refresh',
+                    secret_hash: '',
+                    salt: '',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: JSON.stringify(['http://127.0.0.1:43111/callback']),
+                    grant_types: JSON.stringify(['authorization_code']),
+                    token_endpoint_auth_method: 'none',
+                },
+            ],
+            [
+                {
+                    id: 'short-lived-code',
+                    client_id: 'ez_no_refresh',
+                    redirect_uri: 'http://127.0.0.1:43111/callback',
+                    code_challenge: codeChallenge,
+                    code_challenge_method: 'S256',
+                    expires_at: new Date(Date.now() + 60_000).toISOString(),
+                    user_id: 1,
+                },
+            ]
+        );
+
+        const tokenResponse = await app.fetch(
+            new Request('https://example.com/mcp/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    grant_type: 'authorization_code',
+                    client_id: 'ez_no_refresh',
+                    code: 'short-lived-code',
+                    code_verifier: codeVerifier,
+                    redirect_uri: 'http://127.0.0.1:43111/callback',
+                }),
+            }),
+            env
+        );
+
+        expect(tokenResponse.status).toBe(200);
+        const tokenBody = await tokenResponse.json();
+        expect(tokenBody.refresh_token).toBeUndefined();
+
+        const manualRefreshToken = await signTestJwt(
+            {
+                sub: 'ez_no_refresh',
+                name: 'Short-lived Client',
+                type: 'refresh',
+                iat: Math.floor(Date.now() / 1000),
+                exp: Math.floor(Date.now() / 1000) + 60 * 60,
+            },
+            'test-jwt-secret'
+        );
+
+        const refreshResponse = await app.fetch(
+            new Request('https://example.com/mcp/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    grant_type: 'refresh_token',
+                    client_id: 'ez_no_refresh',
+                    refresh_token: manualRefreshToken,
+                }),
+            }),
+            env
+        );
+
+        expect(refreshResponse.status).toBe(400);
+        await expect(refreshResponse.json()).resolves.toMatchObject({ error: 'unsupported_grant_type' });
+    });
+
     it('issues 30-day access tokens for client credentials', async () => {
         const salt = generateSalt();
         const secretHash = await hashPassword('super-secret', salt);
@@ -291,5 +749,59 @@ describe('MCP OAuth integration routes', () => {
 
         expect(response.status).toBe(200);
         await expect(response.json()).resolves.toMatchObject({ expires_in: 60 * 60 * 24 * 30 });
+    });
+
+    it('rejects public client registration when grant_types include client_credentials', async () => {
+        const env = await createEnv();
+
+        const response = await app.fetch(
+            new Request('https://example.com/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    client_name: 'Bad Public Client',
+                    redirect_uris: ['http://127.0.0.1:43111/callback'],
+                    grant_types: ['authorization_code', 'client_credentials'],
+                    token_endpoint_auth_method: 'none',
+                }),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toMatchObject({ error: 'invalid_client_metadata' });
+    });
+
+    it('rejects client_credentials token exchange for public clients', async () => {
+        const env = await createEnv([
+            {
+                id: 19,
+                name: 'Public Client',
+                client_id: 'ez_public_credentials',
+                secret_hash: '',
+                salt: '',
+                is_active: 1,
+                last_used_at: null,
+                created_at: new Date().toISOString(),
+                redirect_uris: JSON.stringify(['http://127.0.0.1:43111/callback']),
+                grant_types: JSON.stringify(['authorization_code', 'client_credentials']),
+                token_endpoint_auth_method: 'none',
+            },
+        ]);
+
+        const response = await app.fetch(
+            new Request('https://example.com/mcp/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    grant_type: 'client_credentials',
+                    client_id: 'ez_public_credentials',
+                }),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toMatchObject({ error: 'unsupported_grant_type' });
     });
 });

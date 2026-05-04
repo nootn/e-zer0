@@ -2,7 +2,12 @@
 import { Hono } from 'hono';
 import type { Env, McpClient } from '../types';
 import { Layout, Alert } from '../views/layout';
-import { isAllowedRedirectUri, parseStoredJsonArray } from '../lib/mcp-oauth';
+import {
+    isAllowedRedirectUri,
+    isDynamicRegistrationClient,
+    parseStoredJsonArray,
+    requiresPkce,
+} from '../lib/mcp-oauth';
 
 const authorize = new Hono<{ Bindings: Env; Variables: { userId: number; username: string } }>();
 
@@ -23,10 +28,6 @@ authorize.get('/', async (c) => {
         return c.text('Missing client_id or redirect_uri', 400);
     }
 
-    if (codeChallenge && codeChallengeMethod !== 'S256') {
-        return c.text('Only PKCE code_challenge_method=S256 is supported', 400);
-    }
-
     // Verify client exists
     const client = await c.env.DB.prepare('SELECT * FROM mcp_clients WHERE client_id = ? AND is_active = 1')
         .bind(clientId)
@@ -38,6 +39,14 @@ authorize.get('/', async (c) => {
 
     if (!isAllowedRedirectUri(parseStoredJsonArray(client.redirect_uris), redirectUri)) {
         return c.text('Invalid redirect_uri', 400);
+    }
+
+    if (codeChallenge && codeChallengeMethod !== 'S256') {
+        return c.text('Only PKCE code_challenge_method=S256 is supported', 400);
+    }
+
+    if (requiresPkce(client.token_endpoint_auth_method) && !codeChallenge) {
+        return c.text('Public clients must use PKCE with code_challenge_method=S256', 400);
     }
 
     return c.html(
@@ -95,9 +104,33 @@ authorize.post('/', async (c) => {
         return c.text('Only PKCE code_challenge_method=S256 is supported', 400);
     }
 
+    if (requiresPkce(client.token_endpoint_auth_method) && !codeChallenge) {
+        return c.text('Public clients must use PKCE with code_challenge_method=S256', 400);
+    }
+
     const userId = c.get('userId');
     if (!userId) {
         return c.text('Unauthorized', 401);
+    }
+
+    const mappingCount = await c.env.DB.prepare(
+        'SELECT COUNT(*) as count FROM mcp_client_accounts WHERE mcp_client_id = ?'
+    )
+        .bind(client.id)
+        .first<{ count: number }>();
+
+    if ((!mappingCount || mappingCount.count === 0) && isDynamicRegistrationClient(client)) {
+        const activeAccounts = await c.env.DB.prepare('SELECT id FROM email_accounts WHERE status = ?')
+            .bind('active')
+            .all<{ id: number }>();
+
+        for (const account of activeAccounts.results ?? []) {
+            await c.env.DB.prepare(
+                'INSERT OR IGNORE INTO mcp_client_accounts (mcp_client_id, email_account_id) VALUES (?, ?)'
+            )
+                .bind(client.id, account.id)
+                .run();
+        }
     }
 
     // Generate authorization code

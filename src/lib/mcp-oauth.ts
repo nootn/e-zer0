@@ -59,6 +59,21 @@ export function isAllowedRedirectUri(registeredRedirectUris: string[], requested
     return registeredRedirectUris.includes(requestedRedirectUri);
 }
 
+export function requiresPkce(tokenEndpointAuthMethod: string | null | undefined): boolean {
+    return tokenEndpointAuthMethod === 'none';
+}
+
+export function requiresClientSecret(tokenEndpointAuthMethod: string | null | undefined): boolean {
+    return (tokenEndpointAuthMethod ?? 'client_secret_post') === 'client_secret_post';
+}
+
+export function isDynamicRegistrationClient(client: {
+    redirect_uris?: string | null;
+    grant_types?: string | null;
+}): boolean {
+    return Boolean(client.redirect_uris || client.grant_types);
+}
+
 export function normalizeDynamicClientRegistration(
     payload: DynamicClientRegistrationRequest
 ): NormalizedDynamicClientRegistration {
@@ -98,6 +113,10 @@ export function normalizeDynamicClientRegistration(
         throw new Error(
             `token_endpoint_auth_method must be one of: ${SUPPORTED_TOKEN_ENDPOINT_AUTH_METHODS.join(', ')}`
         );
+    }
+
+    if (tokenEndpointAuthMethod === 'none' && grantTypes.includes('client_credentials')) {
+        throw new Error('Public clients using token_endpoint_auth_method=none cannot use client_credentials');
     }
 
     return {
