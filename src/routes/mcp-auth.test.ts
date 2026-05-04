@@ -529,7 +529,7 @@ describe('MCP OAuth integration routes', () => {
         await expect(response.json()).resolves.toMatchObject({ error: 'invalid_client' });
     });
 
-    it('grants active email-account access on first authorization approval', async () => {
+    it('does not auto-grant email-account access on first authorization approval', async () => {
         const fakeDb = new FakeD1Database(
             [
                 {
@@ -571,57 +571,6 @@ describe('MCP OAuth integration routes', () => {
                     redirect_uri: 'http://127.0.0.1:43111/callback',
                     code_challenge: 'challenge',
                     code_challenge_method: 'S256',
-                }),
-            }),
-            env
-        );
-
-        expect(response.status).toBe(302);
-        expect(fakeDb.clientAccounts).toEqual([
-            { mcp_client_id: 15, email_account_id: 21 },
-            { mcp_client_id: 15, email_account_id: 22 },
-        ]);
-    });
-
-    it('does not auto-grant accounts to legacy zero-access agents during authorization', async () => {
-        const fakeDb = new FakeD1Database(
-            [
-                {
-                    id: 16,
-                    name: 'Legacy Zero Access Agent',
-                    client_id: 'ez_legacy_zero',
-                    secret_hash: 'secret-hash',
-                    salt: 'salt',
-                    is_active: 1,
-                    last_used_at: null,
-                    created_at: new Date().toISOString(),
-                    redirect_uris: null,
-                    grant_types: null,
-                    token_endpoint_auth_method: 'client_secret_post',
-                },
-            ],
-            [],
-            [
-                { id: 21, alias: 'Primary', email_address: 'primary@example.com', status: 'active' },
-                { id: 22, alias: 'Archive', email_address: 'archive@example.com', status: 'active' },
-            ]
-        );
-        const env = {
-            DB: fakeDb as unknown as D1Database,
-            RATE_LIMITER: new FakeKvNamespace() as unknown as KVNamespace,
-            JWT_SECRET: 'test-jwt-secret',
-        };
-
-        const response = await app.fetch(
-            new Request('https://example.com/authorize', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    Cookie: 'ezer0_session=valid-session',
-                },
-                body: new URLSearchParams({
-                    client_id: 'ez_legacy_zero',
-                    redirect_uri: 'https://legacy-agent.example/callback',
                 }),
             }),
             env
@@ -770,6 +719,61 @@ describe('MCP OAuth integration routes', () => {
 
         expect(response.status).toBe(400);
         await expect(response.json()).resolves.toMatchObject({ error: 'invalid_client_metadata' });
+    });
+
+    it('defaults dynamic client registration to confidential client auth', async () => {
+        const env = await createEnv();
+
+        const response = await app.fetch(
+            new Request('https://example.com/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '203.0.113.9' },
+                body: JSON.stringify({
+                    client_name: 'Implicit Confidential Client',
+                    redirect_uris: ['https://client.example/callback'],
+                }),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(201);
+        const body = await response.json();
+        expect(body.token_endpoint_auth_method).toBe('client_secret_post');
+        expect(body.client_secret).toBeTypeOf('string');
+    });
+
+    it('rate limits anonymous dynamic client registration by IP', async () => {
+        const env = await createEnv();
+
+        for (let index = 0; index < 5; index++) {
+            const response = await app.fetch(
+                new Request('https://example.com/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.25' },
+                    body: JSON.stringify({
+                        client_name: `Client ${index}`,
+                        redirect_uris: ['https://client.example/callback'],
+                    }),
+                }),
+                env
+            );
+
+            expect(response.status).toBe(201);
+        }
+
+        const blockedResponse = await app.fetch(
+            new Request('https://example.com/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.25' },
+                body: JSON.stringify({
+                    client_name: 'Blocked Client',
+                    redirect_uris: ['https://client.example/callback'],
+                }),
+            }),
+            env
+        );
+
+        expect(blockedResponse.status).toBe(429);
     });
 
     it('rejects client_credentials token exchange for public clients', async () => {

@@ -1,176 +1,177 @@
 name: Security
 
 on:
-  pull_request:
-  push:
-    branches: [main]
-  schedule:
-    - cron: '0 20 * * 0'
-  workflow_dispatch:
+    pull_request:
+    push:
+        branches: [main]
+    schedule:
+        - cron: '0 6 * * *'
+    workflow_dispatch:
 
 permissions:
-  contents: read
-  security-events: write
-  actions: read
+    contents: read
+    security-events: write
+    actions: read
 
 jobs:
-  quality:
-    name: Typecheck, format and test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    quality:
+        name: Typecheck, format and test
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+                  cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
+            - name: Install dependencies
+              run: npm ci
 
-      - name: Format check
-        run: npm run format:check
+            - name: Format check
+              run: npm run format:check
 
-      - name: Typecheck
-        run: npm run typecheck
+            - name: Typecheck
+              run: npm run typecheck
 
-      - name: Test
-        run: npm test
+            - name: Test
+              run: npm test
 
-  codeql:
-    name: CodeQL
-    runs-on: ubuntu-latest
-    # CodeQL requires Code Scanning to be enabled. On a private repo this
-    # needs GitHub Advanced Security or making the repo public. Each step
-    # is set to continue-on-error so the job reports success until GHAS is
-    # turned on — see docs/security-scanning.md.
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    codeql:
+        name: CodeQL (non-blocking until GHAS/code scanning is enabled)
+        runs-on: ubuntu-latest
+        # CodeQL requires Code Scanning to be enabled. On a private repo this
+        # needs GitHub Advanced Security or making the repo public. Each step
+        # is set to continue-on-error so the job reports success until GHAS is
+        # turned on — see docs/security-scanning.md.
+        # TODO(security): remove continue-on-error before making this a required check.
+        permissions:
+            contents: read
+            security-events: write
+            actions: read
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        continue-on-error: true
-        with:
-          languages: javascript-typescript
-          queries: security-extended,security-and-quality
+            - name: Initialize CodeQL
+              uses: github/codeql-action/init@v3
+              continue-on-error: true
+              with:
+                  languages: javascript-typescript
+                  queries: security-extended,security-and-quality
 
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
-        continue-on-error: true
+            - name: Autobuild
+              uses: github/codeql-action/autobuild@v3
+              continue-on-error: true
 
-      - name: Analyze
-        uses: github/codeql-action/analyze@v3
-        continue-on-error: true
-        with:
-          category: '/language:javascript-typescript'
+            - name: Analyze
+              uses: github/codeql-action/analyze@v3
+              continue-on-error: true
+              with:
+                  category: '/language:javascript-typescript'
 
-  semgrep:
-    name: Semgrep OSS
-    runs-on: ubuntu-latest
-    container:
-      image: semgrep/semgrep:latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    semgrep:
+        name: Semgrep OSS
+        runs-on: ubuntu-latest
+        container:
+            image: semgrep/semgrep:latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
 
-      - name: Run Semgrep
-        run: |
-          semgrep scan \
-            --config p/typescript \
-            --config p/javascript \
-            --config p/nodejs \
-            --config p/owasp-top-ten \
-            --severity ERROR \
-            --error \
-            --metrics=off
+            - name: Run Semgrep
+              run: |
+                  semgrep scan \
+                    --config p/typescript \
+                    --config p/javascript \
+                    --config p/nodejs \
+                    --config p/owasp-top-ten \
+                    --severity ERROR \
+                    --error \
+                    --metrics=off
 
-  dependencies:
-    name: Dependency scanning
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    dependencies:
+        name: Dependency scanning
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+                  cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
+            - name: Install dependencies
+              run: npm ci
 
-      - name: npm audit (high/critical)
-        run: npm audit --audit-level=high --omit=dev
-        continue-on-error: false
+            - name: npm audit (high/critical)
+              run: npm audit --audit-level=high --omit=dev
+              continue-on-error: false
 
-      - name: Install OSV Scanner
-        run: |
-          set -euo pipefail
-          OSV_VERSION=2.3.6
-          curl -sSL "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64" \
-            -o /tmp/osv-scanner
-          sudo install -m 0755 /tmp/osv-scanner /usr/local/bin/osv-scanner
-          osv-scanner --version
+            - name: Install OSV Scanner
+              run: |
+                  set -euo pipefail
+                  OSV_VERSION=2.3.6
+                  curl -sSL "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64" \
+                    -o /tmp/osv-scanner
+                  sudo install -m 0755 /tmp/osv-scanner /usr/local/bin/osv-scanner
+                  osv-scanner --version
 
-      - name: OSV Scanner
-        run: osv-scanner scan source --recursive ./
+            - name: OSV Scanner
+              run: osv-scanner scan source --recursive ./
 
-  secrets:
-    name: Secret scanning
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout (full history)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    secrets:
+        name: Secret scanning
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout (full history)
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
 
-      # The official gitleaks-action requires a license for org/private use
-      # and calls GitHub APIs that 403 on private repos. Install the OSS CLI
-      # directly instead — same engine, no license, no API calls.
-      - name: Install Gitleaks
-        run: |
-          GITLEAKS_VERSION=8.21.2
-          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin gitleaks
-          gitleaks version
+            # The official gitleaks-action requires a license for org/private use
+            # and calls GitHub APIs that 403 on private repos. Install the OSS CLI
+            # directly instead — same engine, no license, no API calls.
+            - name: Install Gitleaks
+              run: |
+                  GITLEAKS_VERSION=8.21.2
+                  curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+                    | sudo tar -xz -C /usr/local/bin gitleaks
+                  gitleaks version
 
-      - name: Run Gitleaks
-        run: gitleaks detect --source . --verbose --redact --no-banner --exit-code 1
+            - name: Run Gitleaks
+              run: gitleaks detect --source . --verbose --redact --no-banner --exit-code 1
 
-  trivy:
-    name: Trivy filesystem scan
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    trivy:
+        name: Trivy filesystem scan
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
 
-      - name: Install Trivy
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends wget gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
-            | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
-            | sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update -qq
-          sudo apt-get install -y trivy
-          trivy --version
+            - name: Install Trivy
+              run: |
+                  set -euo pipefail
+                  sudo apt-get update -qq
+                  sudo apt-get install -y --no-install-recommends wget gnupg lsb-release
+                  wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
+                    | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+                  echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
+                    | sudo tee /etc/apt/sources.list.d/trivy.list
+                  sudo apt-get update -qq
+                  sudo apt-get install -y trivy
+                  trivy --version
 
-      - name: Run Trivy fs scan
-        run: |
-          trivy fs \
-            --severity CRITICAL,HIGH \
-            --exit-code 1 \
-            --ignore-unfixed \
-            --skip-dirs node_modules,.wrangler \
-            --format table \
-            .
+            - name: Run Trivy fs scan
+              run: |
+                  trivy fs \
+                    --severity CRITICAL,HIGH \
+                    --exit-code 1 \
+                    --ignore-unfixed \
+                    --skip-dirs node_modules,.wrangler \
+                    --format table \
+                    .

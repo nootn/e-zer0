@@ -2,10 +2,23 @@ import { Hono } from 'hono';
 import type { Env } from '../types';
 import { generateClientId, generateClientSecret, generateSalt, hashPassword } from '../lib/crypto';
 import { normalizeDynamicClientRegistration } from '../lib/mcp-oauth';
+import { checkRateLimit, incrementRateLimit } from '../lib/rate-limit';
 
 const register = new Hono<{ Bindings: Env }>();
 
 register.post('/', async (c) => {
+    const ip = c.req.header('CF-Connecting-IP') || 'unknown';
+    const rlKey = `rate_limit:register:${ip}`;
+
+    if (!(await checkRateLimit(c.env.RATE_LIMITER, rlKey))) {
+        return c.json(
+            { error: 'too_many_requests', error_description: 'Too many registration attempts. Try again later.' },
+            429
+        );
+    }
+
+    await incrementRateLimit(c.env.RATE_LIMITER, rlKey);
+
     let body: unknown;
 
     try {

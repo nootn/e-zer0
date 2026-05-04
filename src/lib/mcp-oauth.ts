@@ -51,11 +51,6 @@ export function isAllowedRedirectUri(registeredRedirectUris: string[], requested
         return false;
     }
 
-    if (registeredRedirectUris.length === 0) {
-        // Backward compatibility for legacy pre-registered clients created before redirect URIs were stored.
-        return true;
-    }
-
     return registeredRedirectUris.includes(requestedRedirectUri);
 }
 
@@ -67,13 +62,6 @@ export function requiresClientSecret(tokenEndpointAuthMethod: string | null | un
     return (tokenEndpointAuthMethod ?? 'client_secret_post') === 'client_secret_post';
 }
 
-export function isDynamicRegistrationClient(client: {
-    redirect_uris?: string | null;
-    grant_types?: string | null;
-}): boolean {
-    return Boolean(client.redirect_uris || client.grant_types);
-}
-
 export function normalizeDynamicClientRegistration(
     payload: DynamicClientRegistrationRequest
 ): NormalizedDynamicClientRegistration {
@@ -83,7 +71,8 @@ export function normalizeDynamicClientRegistration(
         new Set(payload.grant_types?.length ? payload.grant_types : ['authorization_code', 'refresh_token'])
     );
     const responseTypes = Array.from(new Set(payload.response_types?.length ? payload.response_types : ['code']));
-    const tokenEndpointAuthMethod = (payload.token_endpoint_auth_method ?? 'none') as SupportedTokenEndpointAuthMethod;
+    const tokenEndpointAuthMethod = (payload.token_endpoint_auth_method ??
+        'client_secret_post') as SupportedTokenEndpointAuthMethod;
 
     if (redirectUris.length === 0) {
         throw new Error('redirect_uris must contain at least one redirect URI');

@@ -305,9 +305,17 @@ agents.post('/create', async (c) => {
     const secretHash = await hashPassword(clientSecret, salt);
 
     const insertResult = await c.env.DB.prepare(
-        'INSERT INTO mcp_clients (name, client_id, secret_hash, salt) VALUES (?, ?, ?, ?) RETURNING id'
+        `INSERT INTO mcp_clients (
+            name,
+            client_id,
+            secret_hash,
+            salt,
+            redirect_uris,
+            grant_types,
+            token_endpoint_auth_method
+        ) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`
     )
-        .bind(name, clientId, secretHash, salt)
+        .bind(name, clientId, secretHash, salt, '[]', '["client_credentials"]', 'client_secret_post')
         .first<{ id: number }>();
 
     if (insertResult && insertResult.id && accountIds.length > 0) {

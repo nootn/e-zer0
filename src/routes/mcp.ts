@@ -160,9 +160,14 @@ mcp.post('/token', async (c) => {
     }
 
     const tokenEndpointAuthMethod = client.token_endpoint_auth_method ?? 'client_secret_post';
-    const registeredGrantTypes = parseStoredJsonArray(client.grant_types);
-    const supportsGrantType = (candidate: string) =>
-        registeredGrantTypes.length === 0 || registeredGrantTypes.includes(candidate);
+    const parsedGrantTypes = parseStoredJsonArray(client.grant_types);
+    const registeredGrantTypes =
+        parsedGrantTypes.length > 0
+            ? parsedGrantTypes
+            : requiresClientSecret(tokenEndpointAuthMethod)
+              ? ['client_credentials']
+              : [];
+    const supportsGrantType = (candidate: string) => registeredGrantTypes.includes(candidate);
 
     if (!supportsGrantType(grantType)) {
         await incrementRateLimit(c.env.RATE_LIMITER, rlKey);

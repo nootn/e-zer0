@@ -10,10 +10,6 @@ useDefault = true
 description = "Documented placeholders + sanitizer test fixtures"
 paths = [
   '''(^|/)\.dev\.vars\.example$''',
-  '''(^|/)docs/.*\.md$''',
-  '''(^|/)README\.md$''',
   # Test fixtures (fake PEM markers, dummy AES keys for crypto round-trips).
-  # Allowlisting *.test.ts is acceptable here because Workers test files are
-  # never deployed and contain only synthetic values.
-  '''(^|/)src/.*\.test\.ts$''',
+  '''(^|/)src/lib/crypto\.test\.ts$''',
 ]

@@ -6,24 +6,26 @@ e-zer0 exposes a remote MCP server over Streamable HTTP, so Codex can connect to
 
 1. Add your deployed MCP server to Codex:
 
-   ```powershell
-   codex mcp add ezer0 --url https://<YOUR_INSTANCE_NAME>.workers.dev/mcp
-   ```
+    ```powershell
+    codex mcp add ezer0 --url https://<YOUR_INSTANCE_NAME>.workers.dev/mcp
+    ```
 
 2. Start the OAuth login flow:
 
-   ```powershell
-   codex mcp login ezer0
-   ```
+    ```powershell
+    codex mcp login ezer0
+    ```
 
 3. Approve the authorization request in your e-zer0 web UI when Codex opens the browser.
 
-4. Verify the connection:
+4. In e-zer0, open `Agent Management` and assign the email accounts Codex should be allowed to access. A fresh OAuth client is authorized to sign in, but mailbox permissions are still managed there.
 
-   ```powershell
-   codex mcp list
-   codex mcp get ezer0
-   ```
+5. Verify the connection:
+
+    ```powershell
+    codex mcp list
+    codex mcp get ezer0
+    ```
 
 ## What changed to support Codex
 
