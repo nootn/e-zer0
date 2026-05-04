@@ -41,3 +41,14 @@ id = "github-pat"
   regexes = [
     '''sanitizeEmailContent\('ghp_''',
   ]
+
+[[rules]]
+id = "private-key"
+
+  [[rules.allowlists]]
+  description = "Historical private key fixture in sanitizer tests"
+  path = '''(^|/)src/lib/sanitizer\.test\.ts$'''
+  regexTarget = "line"
+  regexes = [
+    '''BEGIN PRIVATE KEY''',
+  ]

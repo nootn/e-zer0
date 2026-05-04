@@ -8,14 +8,14 @@ or in GitHub Actions — no SaaS signup required.
 `.github/workflows/security.yml` runs on every PR, push to `main`, weekly
 (Sunday 20:00 UTC), and on manual dispatch.
 
-| Job            | Tool                    | Purpose                                                                                   |
-| -------------- | ----------------------- | ----------------------------------------------------------------------------------------- |
-| `quality`      | tsc, prettier, vitest   | Format, typecheck, tests                                                                  |
-| `codeql`       | GitHub CodeQL           | TypeScript/JavaScript static security analysis (see GHAS note below)                      |
-| `semgrep`      | Semgrep OSS             | Pattern-based source scanning (TS/JS/Node/OWASP top10), uploaded as SARIF                 |
-| `dependencies` | npm audit + OSV Scanner | Known-CVE scanning across the dep tree                                                    |
-| `secrets`      | Gitleaks                | Secret scanning of full git history                                                       |
-| `trivy`        | Trivy fs                | Repository filesystem scan for lockfiles/manifests/IaC (HIGH/CRITICAL), uploaded as SARIF |
+| Job            | Tool                    | Purpose                                                                                                                 |
+| -------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `quality`      | tsc, prettier, vitest   | Format, typecheck, tests                                                                                                |
+| `codeql`       | GitHub CodeQL           | TypeScript/JavaScript static security analysis (see GHAS note below)                                                    |
+| `semgrep`      | Semgrep OSS             | Pattern-based source scanning (TS/JS/Node/OWASP top10), uploaded as SARIF when code scanning is enabled                 |
+| `dependencies` | npm audit + OSV Scanner | Known-CVE scanning across the dep tree                                                                                  |
+| `secrets`      | Gitleaks                | Secret scanning of full git history                                                                                     |
+| `trivy`        | Trivy fs                | Repository filesystem scan for lockfiles/manifests/IaC (HIGH/CRITICAL), uploaded as SARIF when code scanning is enabled |
 
 `.github/workflows/dast.yml` runs OWASP ZAP Baseline on demand against a
 deployed URL (manual dispatch only).
@@ -41,6 +41,10 @@ npm run security                # runs the lot
 
 CI installs each scanner directly from pinned upstream releases with checksum
 verification, so you do **not** need any of these locally to pass PR checks.
+
+If GitHub code scanning is not enabled for the repository, the workflow still
+runs Semgrep and Trivy but skips SARIF upload instead of failing the job on the
+upload step.
 
 ### Suggested install (macOS/Linux)
 
