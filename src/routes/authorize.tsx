@@ -111,7 +111,6 @@ authorize.post('/', async (c) => {
     if (clientOrResponse instanceof Response) {
         return clientOrResponse;
     }
-    const client = clientOrResponse;
 
     const userId = c.get('userId');
     if (!userId) {
