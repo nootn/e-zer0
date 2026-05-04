@@ -1,0 +1,54 @@
+title = "e-zer0 gitleaks config"
+
+# Extend the default ruleset rather than replacing it.
+[extend]
+useDefault = true
+
+# Allow placeholder values inside example/template files. These never contain
+# real secrets — the live equivalents are gitignored or stored in encrypted D1.
+[[allowlists]]
+description = "Documented placeholder env template"
+paths = [
+  '''(^|/)\.dev\.vars\.example$''',
+]
+
+[[rules]]
+id = "generic-api-key"
+
+  [[rules.allowlists]]
+  description = "Historical AES fixture in crypto tests"
+  path = '''(^|/)src/lib/crypto\.test\.ts$'''
+  regexTarget = "line"
+  regexes = [
+    '''const testKey = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2';''',
+  ]
+
+  [[rules.allowlists]]
+  description = "Historical OpenAI-style fixture in sanitizer tests"
+  path = '''(^|/)src/lib/sanitizer\.test\.ts$'''
+  regexTarget = "line"
+  regexes = [
+    '''sanitizeEmailContent\('Token: sk-''',
+  ]
+
+[[rules]]
+id = "github-pat"
+
+  [[rules.allowlists]]
+  description = "Historical GitHub PAT fixture in sanitizer tests"
+  path = '''(^|/)src/lib/sanitizer\.test\.ts$'''
+  regexTarget = "line"
+  regexes = [
+    '''sanitizeEmailContent\('ghp_''',
+  ]
+
+[[rules]]
+id = "private-key"
+
+  [[rules.allowlists]]
+  description = "Historical private key fixture in sanitizer tests"
+  path = '''(^|/)src/lib/sanitizer\.test\.ts$'''
+  regexTarget = "line"
+  regexes = [
+    '''BEGIN PRIVATE KEY''',
+  ]

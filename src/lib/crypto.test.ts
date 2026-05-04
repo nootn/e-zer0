@@ -88,7 +88,7 @@ describe('verifyPassword', () => {
 // ── AES-GCM Encryption ─────────────────────────────────
 
 describe('encrypt / decrypt', () => {
-    const testKey = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2';
+    const testKey = 'a1b2'.repeat(16); // gitleaks:allow
 
     it('round-trips plaintext correctly', async () => {
         const plaintext = 'Hello, this is a secret message!';
@@ -110,7 +110,7 @@ describe('encrypt / decrypt', () => {
     });
 
     it('throws on decryption with wrong key', async () => {
-        const wrongKey = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+        const wrongKey = 'f'.repeat(64); // gitleaks:allow
         const encrypted = await encrypt('test', testKey);
         await expect(decrypt(encrypted, wrongKey)).rejects.toThrow();
     });

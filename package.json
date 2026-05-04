@@ -19,7 +19,13 @@
         "format": "prettier --write \"src/**/*.{ts,tsx}\" \"*.{json,md}\"",
         "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"*.{json,md}\"",
         "check": "npm run format && npm run lint && npm run test",
-        "ci:check": "npm ci && npm run check"
+        "ci:check": "npm ci && npm run check",
+        "security:audit": "npm audit --audit-level=high --omit=dev",
+        "security:deps": "osv-scanner scan source --recursive ./",
+        "security:secrets": "gitleaks detect --source . --verbose --redact",
+        "security:semgrep": "semgrep scan --config p/typescript --config p/javascript --config p/nodejs --config p/owasp-top-ten --metrics=off",
+        "security:trivy": "trivy fs --severity HIGH,CRITICAL --ignore-unfixed --skip-dirs node_modules,.wrangler .",
+        "security": "npm run security:audit && npm run security:deps && npm run security:secrets && npm run security:semgrep && npm run security:trivy"
     },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.27.1",
@@ -27,7 +33,7 @@
         "zod": "^4.3.6"
     },
     "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260305.0",
+        "@cloudflare/workers-types": "^4.20260503.1",
         "prettier": "^3.8.1",
         "typescript": "^5.9.3",
         "vitest": "^4.0.18",

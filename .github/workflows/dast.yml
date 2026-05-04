@@ -1,0 +1,28 @@
+name: DAST
+
+on:
+    workflow_dispatch:
+        inputs:
+            target_url:
+                description: 'URL to scan (prefer staging/preview, never production without consent)'
+                required: true
+                type: string
+
+permissions:
+    contents: read
+
+jobs:
+    zap:
+        name: OWASP ZAP Baseline
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: ZAP Baseline Scan
+              uses: zaproxy/action-baseline@2b5fc7f98d837319798ab7f128ea50b7d40563b6 # v0.14.0
+              with:
+                  target: ${{ inputs.target_url }}
+                  cmd_options: '-a'
+                  fail_action: false
+                  allow_issue_writing: false

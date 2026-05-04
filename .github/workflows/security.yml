@@ -1,0 +1,284 @@
+name: Security
+
+on:
+    pull_request:
+    push:
+        branches: [main]
+    schedule:
+        - cron: '0 6 * * *'
+    workflow_dispatch:
+
+permissions:
+    contents: read
+    security-events: write
+    actions: read
+
+jobs:
+    quality:
+        name: Typecheck, format and test
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+                  cache: 'npm'
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Format check
+              run: npm run format:check
+
+            - name: Typecheck
+              run: npm run typecheck
+
+            - name: Test
+              run: npm test
+
+    security-platform-eligibility:
+        name: Security platform eligibility
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            security-events: read
+        outputs:
+            run_codeql: ${{ steps.visibility.outputs.run_codeql }}
+            can_upload_sarif: ${{ steps.code_scanning.outputs.can_upload_sarif }}
+        steps:
+            - name: Check repository visibility
+              id: visibility
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
+                  GITHUB_API_URL: ${{ github.api_url }}
+                  GITHUB_REPOSITORY: ${{ github.repository }}
+              run: |
+                  set -euo pipefail
+                  visibility="$(curl -fsSL \
+                    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                    -H "Accept: application/vnd.github+json" \
+                    "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}" \
+                    | python3 -c "import json,sys; print(json.load(sys.stdin)['visibility'])")"
+
+                  if [ "${visibility}" = "public" ]; then
+                    echo "run_codeql=true" >> "${GITHUB_OUTPUT}"
+                  else
+                    echo "run_codeql=false" >> "${GITHUB_OUTPUT}"
+                  fi
+
+            - name: Check code scanning availability
+              id: code_scanning
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
+                  GITHUB_API_URL: ${{ github.api_url }}
+                  GITHUB_REPOSITORY: ${{ github.repository }}
+              run: |
+                  set -euo pipefail
+                  status="$(curl -sSL -o /tmp/code-scanning.json -w "%{http_code}" \
+                    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                    -H "Accept: application/vnd.github+json" \
+                    "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/code-scanning/analyses?per_page=1")"
+
+                  if [ "${status}" = "200" ]; then
+                    echo "can_upload_sarif=true" >> "${GITHUB_OUTPUT}"
+                  else
+                    echo "can_upload_sarif=false" >> "${GITHUB_OUTPUT}"
+                    echo "Skipping SARIF upload because code scanning is unavailable (HTTP ${status})."
+                    cat /tmp/code-scanning.json
+                  fi
+
+    codeql:
+        if: needs.security-platform-eligibility.outputs.run_codeql == 'true'
+        needs: security-platform-eligibility
+        name: CodeQL
+        runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+        # Private repositories without GHAS skip CodeQL. Visibility is checked
+        # via the repo API so schedule/workflow_dispatch stay accurate too.
+        permissions:
+            contents: read
+            security-events: write
+            actions: read
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - language: actions
+                      build-mode: none
+                    - language: javascript-typescript
+                      build-mode: none
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Initialize CodeQL
+              uses: github/codeql-action/init@v4
+              with:
+                  languages: ${{ matrix.language }}
+                  build-mode: ${{ matrix.build-mode }}
+                  queries: security-extended,security-and-quality
+
+            - name: Analyze
+              uses: github/codeql-action/analyze@v4
+              with:
+                  category: '/language:${{ matrix.language }}'
+
+    semgrep:
+        name: Semgrep OSS
+        runs-on: ubuntu-latest
+        needs: security-platform-eligibility
+        container:
+            image: semgrep/semgrep:latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Run Semgrep
+              id: semgrep_scan
+              continue-on-error: true
+              run: |
+                  semgrep scan \
+                    --config p/typescript \
+                    --config p/javascript \
+                    --config p/nodejs \
+                    --config p/owasp-top-ten \
+                    --severity ERROR \
+                    --sarif \
+                    --output semgrep.sarif \
+                    --error \
+                    --metrics=off
+
+            - name: Upload Semgrep SARIF
+              if: always() && needs.security-platform-eligibility.outputs.can_upload_sarif == 'true'
+              uses: github/codeql-action/upload-sarif@v4
+              with:
+                  sarif_file: semgrep.sarif
+
+            - name: Fail on Semgrep findings
+              if: steps.semgrep_scan.outcome == 'failure'
+              run: exit 1
+
+    dependencies:
+        name: Dependency scanning
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+                  cache: 'npm'
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: npm audit (high/critical)
+              run: npm audit --audit-level=high --omit=dev
+              continue-on-error: false
+
+            - name: Install OSV Scanner
+              run: |
+                  set -euo pipefail
+                  OSV_VERSION=2.3.6
+                  OSV_ASSET="osv-scanner_linux_amd64"
+                  OSV_TMP_DIR="$(mktemp -d)"
+                  trap 'rm -rf "${OSV_TMP_DIR}"' EXIT
+                  curl -fsSL "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/${OSV_ASSET}" \
+                    -o "${OSV_TMP_DIR}/${OSV_ASSET}"
+                  curl -fsSL "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_SHA256SUMS" \
+                    -o "${OSV_TMP_DIR}/osv-scanner_SHA256SUMS"
+                  (
+                    cd "${OSV_TMP_DIR}"
+                    grep "  ${OSV_ASSET}\$" osv-scanner_SHA256SUMS | sha256sum -c -
+                  )
+                  sudo install -m 0755 "${OSV_TMP_DIR}/${OSV_ASSET}" /usr/local/bin/osv-scanner
+                  osv-scanner --version
+
+            - name: OSV Scanner
+              run: osv-scanner scan source --recursive ./
+
+    secrets:
+        name: Secret scanning
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout (full history)
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            # The official gitleaks-action requires a license for org/private use
+            # and calls GitHub APIs that 403 on private repos. Install the OSS CLI
+            # directly instead — same engine, no license, no API calls.
+            - name: Install Gitleaks
+              run: |
+                  set -euo pipefail
+                  GITLEAKS_VERSION=8.21.2
+                  GITLEAKS_ASSET="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+                  GITLEAKS_TMP_DIR="$(mktemp -d)"
+                  trap 'rm -rf "${GITLEAKS_TMP_DIR}"' EXIT
+                  curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${GITLEAKS_ASSET}" \
+                    -o "${GITLEAKS_TMP_DIR}/${GITLEAKS_ASSET}"
+                  curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" \
+                    -o "${GITLEAKS_TMP_DIR}/gitleaks_checksums.txt"
+                  (
+                    cd "${GITLEAKS_TMP_DIR}"
+                    grep " ${GITLEAKS_ASSET}\$" gitleaks_checksums.txt | sha256sum -c -
+                    sudo tar -xzf "${GITLEAKS_ASSET}" -C /usr/local/bin gitleaks
+                  )
+                  gitleaks version
+
+            - name: Run Gitleaks
+              run: gitleaks detect --source . --verbose --redact --no-banner --exit-code 1
+
+    trivy:
+        name: Trivy filesystem scan
+        runs-on: ubuntu-latest
+        needs: security-platform-eligibility
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Install Trivy
+              run: |
+                  set -euo pipefail
+                  TRIVY_VERSION=0.69.3
+                  TRIVY_ASSET="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+                  TRIVY_TMP_DIR="$(mktemp -d)"
+                  trap 'rm -rf "${TRIVY_TMP_DIR}"' EXIT
+                  curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${TRIVY_ASSET}" \
+                    -o "${TRIVY_TMP_DIR}/${TRIVY_ASSET}"
+                  curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_checksums.txt" \
+                    -o "${TRIVY_TMP_DIR}/trivy_checksums.txt"
+                  (
+                    cd "${TRIVY_TMP_DIR}"
+                    grep " ${TRIVY_ASSET}\$" trivy_checksums.txt | sha256sum -c -
+                    sudo tar -xzf "${TRIVY_ASSET}" -C /usr/local/bin trivy
+                  )
+                  trivy --version
+
+            - name: Run Trivy fs scan
+              id: trivy_scan
+              continue-on-error: true
+              run: |
+                  trivy fs \
+                    --severity CRITICAL,HIGH \
+                    --exit-code 1 \
+                    --ignore-unfixed \
+                    --skip-dirs node_modules,.wrangler \
+                    --format sarif \
+                    --output trivy.sarif \
+                    .
+
+            - name: Upload Trivy SARIF
+              if: always() && needs.security-platform-eligibility.outputs.can_upload_sarif == 'true'
+              uses: github/codeql-action/upload-sarif@v4
+              with:
+                  sarif_file: trivy.sarif
+
+            - name: Fail on Trivy findings
+              if: steps.trivy_scan.outcome == 'failure'
+              run: exit 1
