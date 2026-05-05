@@ -1,30 +1,31 @@
-# Connecting to Microsoft Copilot Studio
+# Connecting e-zer0 to Microsoft Copilot Studio
 
-Microsoft Copilot Studio supports adding Model Context Protocol (MCP) servers to give your agents custom skills via REST or streaming. e-zer0 is fully compatible with Copilot Studio.
+e-zer0 supports OAuth dynamic client registration and remote MCP OAuth discovery. If your Copilot Studio environment supports automatic MCP/OAuth discovery, use that flow first.
 
-## Prerequisites
+## Recommended Setup
 
-1. Access to your deployed e-zer0 dashboard.
-2. An active Agent created in e-zer0 (from the **Agents** tab) with its **Client ID** and **Client Secret**.
+1. Add a new MCP server in Copilot Studio.
 
-## Configuration Steps in Copilot Studio
+2. Use your deployed MCP endpoint as the server URL:
 
-When adding e-zer0 as an MCP server in Copilot Studio, fill out the form as follows:
+   `https://<YOUR_INSTANCE_NAME>.workers.dev/mcp`
 
-1. **Server name**: A descriptive name (e.g., `e-zer0 Email Access`).
-2. **Server description**: What the server does.
-3. **Server URL**: The full URL to your MCP endpoint, for example: `https://<YOUR_INSTANCE_NAME>.workers.dev/mcp`
-4. **Authentication**: Select **OAuth 2.0**.
-5. **Type**: Select **Manual**. *(Do **not** use "Dynamic discovery". e-zer0 uses static pre-generated agent credentials, and does not expose a dynamic registration endpoint.)*
+3. Choose the automatic or discovery-based OAuth option if your Copilot Studio build offers one.
 
-### OAuth 2.0 Manual Settings
+4. When e-zer0 opens its authorization page:
 
-After selecting **Manual**, provide the following details:
+   - review or change the `Agent Name`
+   - choose the `Permitted Email Accounts`
+   - optionally leave all accounts unselected if you only want to complete sign-in for now
 
-- **Client ID**: The Client ID generated from the e-zer0 Agents dashboard.
-- **Client secret**: The Client Secret generated from the e-zer0 Agents dashboard.
-- **Authorization URL**: `https://<YOUR_INSTANCE_NAME>.workers.dev/authorize` (Replace with your actual worker URL if different)
-- **Token URL**: `https://<YOUR_INSTANCE_NAME>.workers.dev/mcp/token` (Replace with your actual worker URL if different)
-- **Refresh Token URL**: `https://<YOUR_INSTANCE_NAME>.workers.dev/mcp/token`
+5. Finish the OAuth approval flow and return to Copilot Studio.
 
-Click **Create** or **Save** to finalize the connection. Copilot Studio will now authenticate securely via OAuth 2.0 and will be able to invoke the e-zer0 email tools.
+## Important Notes
+
+- Mailbox access is controlled separately from sign-in.
+- A successfully authorized Copilot client with zero selected accounts can authenticate but will not be able to access any mailboxes yet.
+- Permissions can be changed later in `Agent Management`.
+
+## Fallback
+
+If your Copilot Studio tenant or MCP UI does not support automatic OAuth registration/discovery, use the manual fallback instructions in [MANUAL_CREDENTIALS.md](./MANUAL_CREDENTIALS.md).

@@ -4,11 +4,11 @@ e-zer0 uses the **Streamable HTTP** MCP transport (POST to `/mcp`). The legacy S
 
 OpenClaw and NanoClaw do not automatically complete the OAuth client-credentials flow. The setup is:
 
-1. Create an MCP client in the `e-zer0` dashboard and copy the `client_id` and `client_secret`.
+1. Create a manual MCP client in the `e-zer0` dashboard and copy the `client_id` and `client_secret`.
 2. Exchange those credentials for an access token by calling `POST /mcp/token`.
 3. Configure OpenClaw or NanoClaw to connect to `/mcp` (not `/mcp/sse`) with a static `Authorization: Bearer <token>` header.
 
-`e-zer0` access tokens expire after 1 hour, so you will need to mint and replace the token when it expires.
+`e-zer0` access tokens now last 30 days, so you will only need to mint and replace the token when it expires.
 
 This approach requires your OpenClaw or NanoClaw build to support custom headers on remote MCP HTTP connections. If it cannot attach an `Authorization` header, you will need either:
 
@@ -18,7 +18,7 @@ This approach requires your OpenClaw or NanoClaw build to support custom headers
 ## Step 1: Create e-zer0 credentials
 
 1. Sign in to your deployed `e-zer0` dashboard.
-2. Open the **Agents** or **API Tokens** section.
+2. Open the **Agent Management** section.
 3. Create a new MCP client for OpenClaw or NanoClaw.
 4. Copy the generated `client_id` and `client_secret`.
 
@@ -42,7 +42,7 @@ The response will include:
 {
   "access_token": "<JWT_ACCESS_TOKEN>",
   "token_type": "Bearer",
-  "expires_in": 3600
+  "expires_in": 2592000
 }
 ```
 

@@ -18,7 +18,11 @@ e-zer0 exposes a remote MCP server over Streamable HTTP, so Codex can connect to
 
 3. Approve the authorization request in your e-zer0 web UI when Codex opens the browser.
 
-4. In e-zer0, open `Agent Management` and assign the email accounts Codex should be allowed to access. A fresh OAuth client is authorized to sign in, but mailbox permissions are still managed there.
+4. On the e-zer0 authorization page:
+
+   - review or change the `Agent Name`
+   - choose the `Permitted Email Accounts`
+   - optionally leave all accounts unselected if you only want to complete sign-in for now
 
 5. Verify the connection:
 
@@ -27,12 +31,12 @@ e-zer0 exposes a remote MCP server over Streamable HTTP, so Codex can connect to
     codex mcp get ezer0
     ```
 
-## What changed to support Codex
+## Important Notes
 
-- e-zer0 now supports OAuth Dynamic Client Registration at `/register`
-- The OAuth metadata advertises `registration_endpoint`
-- Authorization-code exchanges now validate the original `redirect_uri`
-- MCP access tokens now last 30 days
+- Mailbox access is controlled separately from sign-in.
+- A successfully authorized Codex client with zero selected accounts can authenticate but will not be able to access any mailboxes yet.
+- Permissions can be changed later in `Agent Management`.
+- MCP access tokens now last 30 days.
 
 ## Endpoint Summary
 
