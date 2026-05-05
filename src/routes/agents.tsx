@@ -15,19 +15,30 @@ const agents = new Hono<{
     };
 }>();
 
+const MAX_CLIENT_NAME_LENGTH = 100;
+
 export async function updateAgentNameAndAccounts(
     db: D1Database,
     agentId: string | number,
     name: string,
     accountIds: number[]
 ) {
-    await db.prepare('UPDATE mcp_clients SET name = ? WHERE id = ?').bind(name, agentId).run();
-    await db.prepare('DELETE FROM mcp_client_accounts WHERE mcp_client_id = ?').bind(agentId).run();
+    const statements = [
+        db.prepare('UPDATE mcp_clients SET name = ? WHERE id = ?').bind(name, agentId),
+        db.prepare('DELETE FROM mcp_client_accounts WHERE mcp_client_id = ?').bind(agentId),
+    ];
 
     if (accountIds.length > 0) {
-        const stmt = db.prepare('INSERT INTO mcp_client_accounts (mcp_client_id, email_account_id) VALUES (?, ?)');
-        await db.batch(accountIds.map((accountId) => stmt.bind(agentId, accountId)));
+        statements.push(
+            ...accountIds.map((accountId) =>
+                db
+                    .prepare('INSERT INTO mcp_client_accounts (mcp_client_id, email_account_id) VALUES (?, ?)')
+                    .bind(agentId, accountId)
+            )
+        );
     }
+
+    await db.batch(statements);
 }
 
 agents.get('/', async (c) => {
@@ -331,6 +342,12 @@ agents.post('/create', async (c) => {
         return c.redirect('/agents?error=' + encodeURIComponent('Agent name is required.'));
     }
 
+    if (name.length > MAX_CLIENT_NAME_LENGTH) {
+        return c.redirect(
+            '/agents?error=' + encodeURIComponent(`Agent name must be ${MAX_CLIENT_NAME_LENGTH} characters or fewer.`)
+        );
+    }
+
     const clientId = generateClientId();
     const clientSecret = generateClientSecret();
     const salt = generateSalt();
@@ -590,7 +607,7 @@ agents.post('/:id/accounts', async (c) => {
 
     await updateAgentNameAndAccounts(c.env.DB, id, name, accountIds);
 
-    return c.redirect('/agents?message=' + encodeURIComponent(`Agent updated for ${name}.`));
+    return c.redirect('/agents?message=' + encodeURIComponent(`Agent ${name} updated.`));
 });
 
 export default agents;

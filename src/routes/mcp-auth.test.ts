@@ -69,6 +69,7 @@ class FakeKvNamespace {
 class FakeD1Database {
     private nextClientId = 100;
     failAuthCodeInsert = false;
+    failClientAccountInsert = false;
 
     constructor(
         readonly clients: TestClientRecord[] = [],
@@ -90,6 +91,7 @@ class FakeD1Database {
     }
 
     async batch(statements: FakePreparedStatement[]) {
+        // Mirror D1 batch transactional behavior: if one statement fails, the sequence is rolled back.
         const snapshot = {
             clients: structuredClone(this.clients),
             authCodes: structuredClone(this.authCodes),
@@ -255,6 +257,9 @@ class FakePreparedStatement {
             this.sql.includes('INSERT OR IGNORE INTO mcp_client_accounts') ||
             this.sql.includes('INSERT INTO mcp_client_accounts')
         ) {
+            if (this.db.failClientAccountInsert) {
+                throw new Error('Simulated client account insert failure');
+            }
             const [clientDbId, emailAccountId] = this.boundValues;
             this.db.insertClientAccount({
                 mcp_client_id: clientDbId as number,
@@ -322,6 +327,12 @@ class FakePreparedStatement {
                 results: this.db.clientAccounts
                     .filter((row) => row.mcp_client_id === clientDbId)
                     .map((row) => ({ email_account_id: row.email_account_id })),
+            } as T;
+        }
+
+        if (this.sql.includes('SELECT id, alias, email_address, status FROM email_accounts')) {
+            return {
+                results: this.db.emailAccounts,
             } as T;
         }
 
@@ -498,6 +509,48 @@ describe('MCP OAuth integration routes', () => {
         expect(response.status).toBe(200);
         const html = await response.text();
         expect(html).toMatch(/name="account_ids" value="2" checked/);
+    });
+
+    it('renders previously granted inactive mailbox access so it can be reviewed or revoked', async () => {
+        const env = await createEnv(
+            [
+                {
+                    id: 39,
+                    name: 'OpenAI Codex',
+                    client_id: 'ez_authorize_inactive_render',
+                    secret_hash: '',
+                    salt: '',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: JSON.stringify(['http://127.0.0.1:43111/callback']),
+                    grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+                    token_endpoint_auth_method: 'none',
+                },
+            ],
+            [],
+            [
+                { id: 1, alias: 'Primary', email_address: 'primary@example.com', status: 'active' },
+                { id: 2, alias: 'Revoked', email_address: 'revoked@example.com', status: 'revoked' },
+            ],
+            [{ mcp_client_id: 39, email_account_id: 2 }]
+        );
+
+        const response = await app.fetch(
+            new Request(
+                'https://example.com/authorize?client_id=ez_authorize_inactive_render&redirect_uri=http%3A%2F%2F127.0.0.1%3A43111%2Fcallback&response_type=code&code_challenge=abc123&code_challenge_method=S256',
+                {
+                    headers: { Cookie: VALID_SESSION_COOKIE },
+                }
+            ),
+            env
+        );
+
+        expect(response.status).toBe(200);
+        const html = await response.text();
+        expect(html).toContain('Previously Granted Inactive Accounts');
+        expect(html).toMatch(/name="account_ids" value="2" checked/);
+        expect(html).toContain('(revoked)');
     });
 
     it('authorization approval updates the client name and selected mailbox mappings', async () => {
@@ -719,6 +772,58 @@ describe('MCP OAuth integration routes', () => {
         expect(fakeDb.authCodes).toEqual([]);
     });
 
+    it('rejects client names longer than 100 characters without mutating grants', async () => {
+        const fakeDb = new FakeD1Database(
+            [
+                {
+                    id: 40,
+                    name: 'OpenAI Codex',
+                    client_id: 'ez_authorize_name_too_long',
+                    secret_hash: '',
+                    salt: '',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: JSON.stringify(['http://127.0.0.1:43111/callback']),
+                    grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+                    token_endpoint_auth_method: 'none',
+                },
+            ],
+            [],
+            [{ id: 1, alias: 'Primary', email_address: 'primary@example.com', status: 'active' }],
+            [{ mcp_client_id: 40, email_account_id: 1 }]
+        );
+        const env = {
+            DB: fakeDb as unknown as D1Database,
+            RATE_LIMITER: new FakeKvNamespace() as unknown as KVNamespace,
+            JWT_SECRET: 'test-jwt-secret',
+        };
+
+        const response = await app.fetch(
+            new Request('https://example.com/authorize', {
+                method: 'POST',
+                headers: {
+                    Cookie: VALID_SESSION_COOKIE,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    client_id: 'ez_authorize_name_too_long',
+                    redirect_uri: 'http://127.0.0.1:43111/callback',
+                    code_challenge: 'abc123',
+                    code_challenge_method: 'S256',
+                    name: 'x'.repeat(101),
+                    account_ids: '1',
+                }).toString(),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(400);
+        expect(fakeDb.clients.find((client) => client.id === 40)?.name).toBe('OpenAI Codex');
+        expect(fakeDb.clientAccounts).toEqual([{ mcp_client_id: 40, email_account_id: 1 }]);
+        expect(fakeDb.authCodes).toEqual([]);
+    });
+
     it('deduplicates submitted mailbox ids before replacing grants', async () => {
         const fakeDb = new FakeD1Database(
             [
@@ -812,8 +917,69 @@ describe('MCP OAuth integration routes', () => {
                     Cookie: VALID_SESSION_COOKIE,
                     'Content-Type': 'application/x-www-form-urlencoded',
                 },
+                body: new URLSearchParams([
+                    ['client_id', 'ez_authorize_inactive_grants'],
+                    ['redirect_uri', 'http://127.0.0.1:43111/callback'],
+                    ['code_challenge', 'abc123'],
+                    ['code_challenge_method', 'S256'],
+                    ['name', 'Codex Reauth'],
+                    ['account_ids', '1'],
+                    ['account_ids', '2'],
+                ]).toString(),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(302);
+        expect(fakeDb.clientAccounts).toEqual([
+            { mcp_client_id: 38, email_account_id: 1 },
+            { mcp_client_id: 38, email_account_id: 2 },
+        ]);
+        expect(fakeDb.authCodes).toHaveLength(1);
+    });
+
+    it('allows revoking previously granted inactive mailboxes during re-authorization', async () => {
+        const fakeDb = new FakeD1Database(
+            [
+                {
+                    id: 41,
+                    name: 'OpenAI Codex',
+                    client_id: 'ez_authorize_revoke_inactive',
+                    secret_hash: '',
+                    salt: '',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: JSON.stringify(['http://127.0.0.1:43111/callback']),
+                    grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+                    token_endpoint_auth_method: 'none',
+                },
+            ],
+            [],
+            [
+                { id: 1, alias: 'Primary', email_address: 'primary@example.com', status: 'active' },
+                { id: 2, alias: 'Revoked', email_address: 'revoked@example.com', status: 'revoked' },
+            ],
+            [
+                { mcp_client_id: 41, email_account_id: 1 },
+                { mcp_client_id: 41, email_account_id: 2 },
+            ]
+        );
+        const env = {
+            DB: fakeDb as unknown as D1Database,
+            RATE_LIMITER: new FakeKvNamespace() as unknown as KVNamespace,
+            JWT_SECRET: 'test-jwt-secret',
+        };
+
+        const response = await app.fetch(
+            new Request('https://example.com/authorize', {
+                method: 'POST',
+                headers: {
+                    Cookie: VALID_SESSION_COOKIE,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
                 body: new URLSearchParams({
-                    client_id: 'ez_authorize_inactive_grants',
+                    client_id: 'ez_authorize_revoke_inactive',
                     redirect_uri: 'http://127.0.0.1:43111/callback',
                     code_challenge: 'abc123',
                     code_challenge_method: 'S256',
@@ -825,10 +991,7 @@ describe('MCP OAuth integration routes', () => {
         );
 
         expect(response.status).toBe(302);
-        expect(fakeDb.clientAccounts).toEqual([
-            { mcp_client_id: 38, email_account_id: 1 },
-            { mcp_client_id: 38, email_account_id: 2 },
-        ]);
+        expect(fakeDb.clientAccounts).toEqual([{ mcp_client_id: 41, email_account_id: 1 }]);
         expect(fakeDb.authCodes).toHaveLength(1);
     });
 
@@ -859,6 +1022,36 @@ describe('MCP OAuth integration routes', () => {
         await updateAgentNameAndAccounts(fakeDb as unknown as D1Database, 33, 'Codex Team Desktop', [2]);
         expect(fakeDb.clients.find((client) => client.id === 33)?.name).toBe('Codex Team Desktop');
         expect(fakeDb.clientAccounts).toEqual([{ mcp_client_id: 33, email_account_id: 2 }]);
+    });
+
+    it('agent edit helper rolls back name and mailbox changes when account update fails', async () => {
+        const fakeDb = new FakeD1Database(
+            [
+                {
+                    id: 42,
+                    name: 'Old Name',
+                    client_id: 'ez_agent_edit_failure',
+                    secret_hash: 'hash',
+                    salt: 'salt',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: '[]',
+                    grant_types: JSON.stringify(['client_credentials']),
+                    token_endpoint_auth_method: 'client_secret_post',
+                },
+            ],
+            [],
+            [{ id: 1, alias: 'Primary', email_address: 'primary@example.com', status: 'active' }],
+            [{ mcp_client_id: 42, email_account_id: 1 }]
+        );
+        fakeDb.failClientAccountInsert = true;
+
+        await expect(
+            updateAgentNameAndAccounts(fakeDb as unknown as D1Database, 42, 'Renamed Agent', [1])
+        ).rejects.toThrow('Simulated client account insert failure');
+        expect(fakeDb.clients.find((client) => client.id === 42)?.name).toBe('Old Name');
+        expect(fakeDb.clientAccounts).toEqual([{ mcp_client_id: 42, email_account_id: 1 }]);
     });
 
     it('rejects public authorization-code exchange when the auth code was issued without PKCE', async () => {

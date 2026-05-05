@@ -5,10 +5,12 @@ import { Layout, Alert } from '../views/layout';
 import { isAllowedRedirectUri, parseStoredJsonArray, requiresPkce } from '../lib/mcp-oauth';
 
 const authorize = new Hono<{ Bindings: Env; Variables: { userId: number; username: string } }>();
+const MAX_CLIENT_NAME_LENGTH = 100;
 
 function buildAuthorizeErrorRedirect(
     clientId: string,
     redirectUri: string,
+    responseType: string,
     error: string,
     state?: string,
     codeChallenge?: string,
@@ -17,7 +19,7 @@ function buildAuthorizeErrorRedirect(
     const params = new URLSearchParams({
         client_id: clientId,
         redirect_uri: redirectUri,
-        response_type: 'code',
+        response_type: responseType,
         error,
     });
 
@@ -93,18 +95,23 @@ authorize.get('/', async (c) => {
         return clientOrResponse;
     }
     const client = clientOrResponse;
-    const accountsResult = await c.env.DB.prepare(
-        'SELECT id, alias, email_address FROM email_accounts WHERE status = ?'
-    )
-        .bind('active')
-        .all<{ id: number; alias: string; email_address: string }>();
-    const accounts = accountsResult.results ?? [];
+    const accountsResult = await c.env.DB.prepare('SELECT id, alias, email_address, status FROM email_accounts').all<{
+        id: number;
+        alias: string;
+        email_address: string;
+        status: string;
+    }>();
+    const allAccounts = accountsResult.results ?? [];
+    const accounts = allAccounts.filter((account) => account.status === 'active');
     const mappingResult = await c.env.DB.prepare(
         'SELECT email_account_id FROM mcp_client_accounts WHERE mcp_client_id = ?'
     )
         .bind(client.id)
         .all<{ email_account_id: number }>();
     const selectedAccountIds = new Set((mappingResult.results ?? []).map((row) => row.email_account_id));
+    const inactiveGrantedAccounts = allAccounts.filter(
+        (account) => account.status !== 'active' && selectedAccountIds.has(account.id)
+    );
 
     return c.html(
         <Layout title="Authorize Required - e-zer0">
@@ -121,6 +128,7 @@ authorize.get('/', async (c) => {
                 <form method="post" action="/authorize" style="display:flex; flex-direction:column; gap:16px;">
                     <input type="hidden" name="client_id" value={clientId} />
                     <input type="hidden" name="redirect_uri" value={redirectUri} />
+                    <input type="hidden" name="response_type" value={responseType} />
                     <input type="hidden" name="state" value={state || ''} />
                     <input type="hidden" name="code_challenge" value={codeChallenge || ''} />
                     <input type="hidden" name="code_challenge_method" value={codeChallengeMethod || ''} />
@@ -135,6 +143,7 @@ authorize.get('/', async (c) => {
                             id="authorize-agent-name"
                             name="name"
                             required
+                            maxLength={MAX_CLIENT_NAME_LENGTH}
                             value={client.name}
                         />
                     </div>
@@ -168,6 +177,26 @@ authorize.get('/', async (c) => {
                         )}
                     </div>
 
+                    {inactiveGrantedAccounts.length > 0 && (
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label class="form-label">Previously Granted Inactive Accounts</label>
+                            <p style="color:var(--text-secondary); font-size:12px; margin-bottom:8px;">
+                                These accounts are currently unavailable. Leave them checked to preserve that grant, or
+                                uncheck them to revoke it now.
+                            </p>
+                            <div style="display:flex; flex-direction:column; gap:8px;">
+                                {inactiveGrantedAccounts.map((acc) => (
+                                    <label style="display:flex; align-items:center; gap:8px; font-size:14px;">
+                                        <input type="checkbox" name="account_ids" value={acc.id} checked />
+                                        <span>
+                                            <strong>{acc.alias}</strong> ({acc.email_address}) <em>({acc.status})</em>
+                                        </span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     <div style="display:flex; flex-direction:column; gap:12px;">
                         <button type="submit" class="btn btn-primary btn-full">
                             Allow Access
@@ -186,6 +215,7 @@ authorize.post('/', async (c) => {
     const form = await c.req.formData();
     const clientId = form.get('client_id')?.toString();
     const redirectUri = form.get('redirect_uri')?.toString();
+    const responseType = form.get('response_type')?.toString() || 'code';
     const state = form.get('state')?.toString();
     const codeChallenge = form.get('code_challenge')?.toString();
     const codeChallengeMethod = form.get('code_challenge_method')?.toString();
@@ -204,6 +234,10 @@ authorize.post('/', async (c) => {
         return c.text('Agent name is required', 400);
     }
 
+    if (name.length > MAX_CLIENT_NAME_LENGTH) {
+        return c.text(`Agent name must be ${MAX_CLIENT_NAME_LENGTH} characters or fewer`, 400);
+    }
+
     const clientOrResponse = await loadAuthorizedClient(c, clientId, redirectUri, codeChallenge, codeChallengeMethod);
     if (clientOrResponse instanceof Response) {
         return clientOrResponse;
@@ -215,25 +249,30 @@ authorize.post('/', async (c) => {
         return c.text('Unauthorized', 401);
     }
 
-    const activeAccountsResult = await c.env.DB.prepare('SELECT id FROM email_accounts WHERE status = ?')
-        .bind('active')
-        .all<{ id: number }>();
-    const activeAccountIds = new Set((activeAccountsResult.results ?? []).map((row) => row.id));
-    const hasInvalidAccountId = accountIds.some((accountId) => !activeAccountIds.has(accountId));
-
-    if (hasInvalidAccountId) {
-        return c.text('Invalid email account selection', 400);
-    }
-
+    const accountsResult = await c.env.DB.prepare('SELECT id, alias, email_address, status FROM email_accounts').all<{
+        id: number;
+        alias: string;
+        email_address: string;
+        status: string;
+    }>();
+    const allAccounts = accountsResult.results ?? [];
+    const activeAccountIds = new Set(
+        allAccounts.filter((account) => account.status === 'active').map((account) => account.id)
+    );
     const existingMappingsResult = await c.env.DB.prepare(
         'SELECT email_account_id FROM mcp_client_accounts WHERE mcp_client_id = ?'
     )
         .bind(client.id)
         .all<{ email_account_id: number }>();
-    const preservedNonActiveAccountIds = (existingMappingsResult.results ?? [])
+    const revocableNonActiveAccountIds = (existingMappingsResult.results ?? [])
         .map((row) => row.email_account_id)
         .filter((accountId) => !activeAccountIds.has(accountId));
-    const replacementAccountIds = [...new Set([...accountIds, ...preservedNonActiveAccountIds])];
+    const allowedAccountIds = new Set([...activeAccountIds, ...revocableNonActiveAccountIds]);
+    const hasInvalidAccountId = accountIds.some((accountId) => !allowedAccountIds.has(accountId));
+
+    if (hasInvalidAccountId) {
+        return c.text('Invalid email account selection', 400);
+    }
 
     // Generate authorization code
     const code = crypto.randomUUID();
@@ -245,9 +284,9 @@ authorize.post('/', async (c) => {
             c.env.DB.prepare('DELETE FROM mcp_client_accounts WHERE mcp_client_id = ?').bind(client.id),
         ];
 
-        if (replacementAccountIds.length > 0) {
+        if (accountIds.length > 0) {
             statements.push(
-                ...replacementAccountIds.map((accountId) =>
+                ...accountIds.map((accountId) =>
                     c.env.DB.prepare(
                         'INSERT INTO mcp_client_accounts (mcp_client_id, email_account_id) VALUES (?, ?)'
                     ).bind(client.id, accountId)
@@ -269,6 +308,7 @@ authorize.post('/', async (c) => {
             buildAuthorizeErrorRedirect(
                 clientId,
                 redirectUri,
+                responseType,
                 'Internal Error',
                 state,
                 codeChallenge,

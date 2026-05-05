@@ -2,6 +2,10 @@
 
 e-zer0 supports OAuth dynamic client registration and remote MCP OAuth discovery. If your Copilot Studio environment supports automatic MCP/OAuth discovery, use that flow first.
 
+## Prerequisite
+
+You need to be signed in to your deployed e-zer0 dashboard so you can approve the browser-based authorization request.
+
 ## Recommended Setup
 
 1. Add a new MCP server in Copilot Studio.
