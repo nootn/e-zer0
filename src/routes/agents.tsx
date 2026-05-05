@@ -15,6 +15,21 @@ const agents = new Hono<{
     };
 }>();
 
+export async function updateAgentNameAndAccounts(
+    db: D1Database,
+    agentId: string | number,
+    name: string,
+    accountIds: number[]
+) {
+    await db.prepare('UPDATE mcp_clients SET name = ? WHERE id = ?').bind(name, agentId).run();
+    await db.prepare('DELETE FROM mcp_client_accounts WHERE mcp_client_id = ?').bind(agentId).run();
+
+    if (accountIds.length > 0) {
+        const stmt = db.prepare('INSERT INTO mcp_client_accounts (mcp_client_id, email_account_id) VALUES (?, ?)');
+        await db.batch(accountIds.map((accountId) => stmt.bind(agentId, accountId)));
+    }
+}
+
 agents.get('/', async (c) => {
     const username = c.get('username');
     const message = c.req.query('message');
@@ -160,14 +175,31 @@ agents.get('/', async (c) => {
                                                             style="display:flex; flex-direction:column; gap:12px;"
                                                         >
                                                             <div>
-                                                                <h4 style="margin:0 0 8px 0; font-size:14px;">
-                                                                    Editing Permissions for "{client.name}"
+                                                                <h4 style="margin:0 0 12px 0; font-size:14px;">
+                                                                    Edit Agent
                                                                 </h4>
+                                                                <div class="form-group" style="margin-bottom:12px;">
+                                                                    <label
+                                                                        class="form-label"
+                                                                        for={`agent-name-${client.id}`}
+                                                                    >
+                                                                        Agent Name
+                                                                    </label>
+                                                                    <input
+                                                                        class="form-input"
+                                                                        type="text"
+                                                                        id={`agent-name-${client.id}`}
+                                                                        name="name"
+                                                                        required
+                                                                        value={client.name}
+                                                                    />
+                                                                </div>
                                                                 <p style="color:var(--text-secondary); font-size:12px; margin:0 0 12px 0;">
-                                                                    Select the email accounts this agent can access.
+                                                                    Select the email accounts this agent can access. No
+                                                                    accounts selected is valid.
                                                                 </p>
                                                                 {accounts.length > 0 ? (
-                                                                    <div style="display:flex; flex-direction:column; gap:6px; max-height:200px; overflow-y:auto; padding:8px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-body);">
+                                                                    <div style="display:flex; flex-direction:column; gap:6px; padding:8px; border:1px solid var(--border-color); border-radius:4px; background:var(--bg-body);">
                                                                         {accounts.map((acc: any) => (
                                                                             <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
                                                                                 <input
@@ -537,10 +569,15 @@ agents.post('/:id/revoke', async (c) => {
 agents.post('/:id/accounts', async (c) => {
     const id = c.req.param('id');
     const form = await c.req.formData();
+    const name = form.get('name')?.toString().trim();
     const accountIds = form
         .getAll('account_ids')
         .map((id) => parseInt(id.toString(), 10))
         .filter((id) => !isNaN(id));
+
+    if (!name) {
+        return c.redirect('/agents?error=' + encodeURIComponent('Agent name is required.'));
+    }
 
     // First, verify the agent exists and is active
     const client = await c.env.DB.prepare('SELECT id, name FROM mcp_clients WHERE id = ? AND is_active = 1')
@@ -551,19 +588,9 @@ agents.post('/:id/accounts', async (c) => {
         return c.redirect('/agents?error=' + encodeURIComponent('Agent not found or is revoked.'));
     }
 
-    // Delete existing mappings
-    await c.env.DB.prepare('DELETE FROM mcp_client_accounts WHERE mcp_client_id = ?').bind(id).run();
+    await updateAgentNameAndAccounts(c.env.DB, id, name, accountIds);
 
-    // Insert new mappings
-    if (accountIds.length > 0) {
-        const stmt = c.env.DB.prepare(
-            'INSERT INTO mcp_client_accounts (mcp_client_id, email_account_id) VALUES (?, ?)'
-        );
-        const batch = accountIds.map((accountId) => stmt.bind(id, accountId));
-        await c.env.DB.batch(batch);
-    }
-
-    return c.redirect('/agents?message=' + encodeURIComponent(`Permissions updated for ${client.name}.`));
+    return c.redirect('/agents?message=' + encodeURIComponent(`Agent updated for ${name}.`));
 });
 
 export default agents;

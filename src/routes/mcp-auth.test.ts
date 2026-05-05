@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import app from '../app';
 import { generateSalt, hashPassword } from '../lib/crypto';
+import { updateAgentNameAndAccounts } from './agents';
 
 interface TestClientRecord {
     id: number;
@@ -67,6 +68,7 @@ class FakeKvNamespace {
 
 class FakeD1Database {
     private nextClientId = 100;
+    failAuthCodeInsert = false;
 
     constructor(
         readonly clients: TestClientRecord[] = [],
@@ -85,6 +87,27 @@ class FakeD1Database {
 
     prepare(sql: string) {
         return new FakePreparedStatement(this, sql);
+    }
+
+    async batch(statements: FakePreparedStatement[]) {
+        const snapshot = {
+            clients: structuredClone(this.clients),
+            authCodes: structuredClone(this.authCodes),
+            clientAccounts: structuredClone(this.clientAccounts),
+        };
+
+        try {
+            const results = [];
+            for (const statement of statements) {
+                results.push(await statement.run());
+            }
+            return results;
+        } catch (error) {
+            this.clients.splice(0, this.clients.length, ...snapshot.clients);
+            this.authCodes.splice(0, this.authCodes.length, ...snapshot.authCodes);
+            this.clientAccounts.splice(0, this.clientAccounts.length, ...snapshot.clientAccounts);
+            throw error;
+        }
     }
 
     insertClient(
@@ -158,6 +181,12 @@ class FakePreparedStatement {
                 null) as T;
         }
 
+        if (this.sql.includes('SELECT id, name FROM mcp_clients WHERE id = ? AND is_active = 1')) {
+            const clientDbId = Number(this.boundValues[0]);
+            const client = this.db.clients.find((row) => row.id === clientDbId && row.is_active === 1);
+            return (client ? { id: client.id, name: client.name } : null) as T;
+        }
+
         if (this.sql.includes('SELECT is_active FROM mcp_clients WHERE client_id = ?')) {
             const clientId = this.boundValues[0];
             const client = this.db.clients.find((row) => row.client_id === clientId);
@@ -196,7 +225,19 @@ class FakePreparedStatement {
             return { success: true };
         }
 
+        if (this.sql.includes('UPDATE mcp_clients SET name = ? WHERE id = ?')) {
+            const [name, id] = this.boundValues;
+            const client = this.db.clients.find((row) => row.id === Number(id));
+            if (client) {
+                client.name = name as string;
+            }
+            return { success: true };
+        }
+
         if (this.sql.includes('INSERT INTO oauth_auth_codes')) {
+            if (this.db.failAuthCodeInsert) {
+                throw new Error('Simulated auth code insert failure');
+            }
             const [id, clientId, redirectUri, codeChallenge, codeChallengeMethod, expiresAt, userId] = this.boundValues;
             this.db.authCodes.push({
                 id: id as string,
@@ -210,7 +251,10 @@ class FakePreparedStatement {
             return { success: true };
         }
 
-        if (this.sql.includes('INSERT OR IGNORE INTO mcp_client_accounts')) {
+        if (
+            this.sql.includes('INSERT OR IGNORE INTO mcp_client_accounts') ||
+            this.sql.includes('INSERT INTO mcp_client_accounts')
+        ) {
             const [clientDbId, emailAccountId] = this.boundValues;
             this.db.insertClientAccount({
                 mcp_client_id: clientDbId as number,
@@ -225,6 +269,16 @@ class FakePreparedStatement {
             if (index >= 0) {
                 this.db.authCodes.splice(index, 1);
             }
+            return { success: true };
+        }
+
+        if (this.sql.includes('DELETE FROM mcp_client_accounts WHERE mcp_client_id = ?')) {
+            const clientDbId = Number(this.boundValues[0]);
+            this.db.clientAccounts.splice(
+                0,
+                this.db.clientAccounts.length,
+                ...this.db.clientAccounts.filter((row) => row.mcp_client_id !== clientDbId)
+            );
             return { success: true };
         }
 
@@ -262,6 +316,22 @@ class FakePreparedStatement {
     }
 
     async all<T>() {
+        if (this.sql.includes('SELECT email_account_id FROM mcp_client_accounts WHERE mcp_client_id = ?')) {
+            const clientDbId = Number(this.boundValues[0]);
+            return {
+                results: this.db.clientAccounts
+                    .filter((row) => row.mcp_client_id === clientDbId)
+                    .map((row) => ({ email_account_id: row.email_account_id })),
+            } as T;
+        }
+
+        if (this.sql.includes('SELECT id, alias, email_address FROM email_accounts WHERE status = ?')) {
+            const status = this.boundValues[0];
+            return {
+                results: this.db.emailAccounts.filter((row) => row.status === status),
+            } as T;
+        }
+
         if (this.sql.includes('SELECT id FROM email_accounts WHERE status = ?')) {
             const status = this.boundValues[0];
             return {
@@ -272,6 +342,8 @@ class FakePreparedStatement {
         throw new Error(`Unhandled all() SQL in test fake: ${this.sql}`);
     }
 }
+
+const VALID_SESSION_COOKIE = 'ezer0_session=valid-session';
 
 async function signTestJwt(payload: Record<string, unknown>, secret: string) {
     const encoder = new TextEncoder();
@@ -344,6 +416,449 @@ describe('MCP OAuth integration routes', () => {
         expect(body.token_endpoint_auth_method).toBe('none');
         expect(body.redirect_uris).toEqual(['http://127.0.0.1:43111/callback']);
         expect(body.client_secret).toBeUndefined();
+    });
+
+    it('renders editable name and mailbox selection on the authorization page', async () => {
+        const env = await createEnv(
+            [
+                {
+                    id: 30,
+                    name: 'OpenAI Codex',
+                    client_id: 'ez_authorize_render',
+                    secret_hash: '',
+                    salt: '',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: JSON.stringify(['http://127.0.0.1:43111/callback']),
+                    grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+                    token_endpoint_auth_method: 'none',
+                },
+            ],
+            [],
+            [
+                { id: 1, alias: 'Primary', email_address: 'primary@example.com', status: 'active' },
+                { id: 2, alias: 'Archive', email_address: 'archive@example.com', status: 'active' },
+            ]
+        );
+
+        const response = await app.fetch(
+            new Request(
+                'https://example.com/authorize?client_id=ez_authorize_render&redirect_uri=http%3A%2F%2F127.0.0.1%3A43111%2Fcallback&response_type=code&code_challenge=abc123&code_challenge_method=S256',
+                {
+                    headers: { Cookie: VALID_SESSION_COOKIE },
+                }
+            ),
+            env
+        );
+
+        expect(response.status).toBe(200);
+        const html = await response.text();
+        expect(html).toContain('Agent Name');
+        expect(html).toContain('name="name"');
+        expect(html).toContain('name="account_ids"');
+        expect(html).toContain('No accounts selected is valid');
+    });
+
+    it('preselects existing mailbox grants when re-authorizing a client', async () => {
+        const env = await createEnv(
+            [
+                {
+                    id: 34,
+                    name: 'OpenAI Codex',
+                    client_id: 'ez_authorize_existing_grants',
+                    secret_hash: '',
+                    salt: '',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: JSON.stringify(['http://127.0.0.1:43111/callback']),
+                    grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+                    token_endpoint_auth_method: 'none',
+                },
+            ],
+            [],
+            [
+                { id: 1, alias: 'Primary', email_address: 'primary@example.com', status: 'active' },
+                { id: 2, alias: 'Archive', email_address: 'archive@example.com', status: 'active' },
+            ],
+            [{ mcp_client_id: 34, email_account_id: 2 }]
+        );
+
+        const response = await app.fetch(
+            new Request(
+                'https://example.com/authorize?client_id=ez_authorize_existing_grants&redirect_uri=http%3A%2F%2F127.0.0.1%3A43111%2Fcallback&response_type=code&code_challenge=abc123&code_challenge_method=S256',
+                {
+                    headers: { Cookie: VALID_SESSION_COOKIE },
+                }
+            ),
+            env
+        );
+
+        expect(response.status).toBe(200);
+        const html = await response.text();
+        expect(html).toMatch(/name="account_ids" value="2" checked/);
+    });
+
+    it('authorization approval updates the client name and selected mailbox mappings', async () => {
+        const fakeDb = new FakeD1Database(
+            [
+                {
+                    id: 31,
+                    name: 'OpenAI Codex',
+                    client_id: 'ez_authorize_update',
+                    secret_hash: '',
+                    salt: '',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: JSON.stringify(['http://127.0.0.1:43111/callback']),
+                    grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+                    token_endpoint_auth_method: 'none',
+                },
+            ],
+            [],
+            [
+                { id: 1, alias: 'Primary', email_address: 'primary@example.com', status: 'active' },
+                { id: 2, alias: 'Archive', email_address: 'archive@example.com', status: 'active' },
+            ],
+            [{ mcp_client_id: 31, email_account_id: 2 }]
+        );
+        const env = {
+            DB: fakeDb as unknown as D1Database,
+            RATE_LIMITER: new FakeKvNamespace() as unknown as KVNamespace,
+            JWT_SECRET: 'test-jwt-secret',
+        };
+
+        const response = await app.fetch(
+            new Request('https://example.com/authorize', {
+                method: 'POST',
+                headers: {
+                    Cookie: VALID_SESSION_COOKIE,
+                    Origin: 'https://example.com',
+                    'Sec-Fetch-Site': 'same-origin',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    client_id: 'ez_authorize_update',
+                    redirect_uri: 'http://127.0.0.1:43111/callback',
+                    state: 'state-1',
+                    code_challenge: 'abc123',
+                    code_challenge_method: 'S256',
+                    name: 'Codex Work Laptop',
+                    account_ids: '1',
+                }).toString(),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(302);
+        expect(fakeDb.clients.find((client) => client.id === 31)?.name).toBe('Codex Work Laptop');
+        expect(fakeDb.clientAccounts).toEqual([{ mcp_client_id: 31, email_account_id: 1 }]);
+        expect(fakeDb.authCodes).toHaveLength(1);
+    });
+
+    it('authorization approval accepts zero selected accounts while still issuing an auth code', async () => {
+        const fakeDb = new FakeD1Database(
+            [
+                {
+                    id: 32,
+                    name: 'OpenAI Codex',
+                    client_id: 'ez_authorize_zero_accounts',
+                    secret_hash: '',
+                    salt: '',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: JSON.stringify(['http://127.0.0.1:43111/callback']),
+                    grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+                    token_endpoint_auth_method: 'none',
+                },
+            ],
+            [],
+            [{ id: 1, alias: 'Primary', email_address: 'primary@example.com', status: 'active' }],
+            [{ mcp_client_id: 32, email_account_id: 1 }]
+        );
+        const env = {
+            DB: fakeDb as unknown as D1Database,
+            RATE_LIMITER: new FakeKvNamespace() as unknown as KVNamespace,
+            JWT_SECRET: 'test-jwt-secret',
+        };
+
+        const response = await app.fetch(
+            new Request('https://example.com/authorize', {
+                method: 'POST',
+                headers: {
+                    Cookie: VALID_SESSION_COOKIE,
+                    Origin: 'https://example.com',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    client_id: 'ez_authorize_zero_accounts',
+                    redirect_uri: 'http://127.0.0.1:43111/callback',
+                    code_challenge: 'abc123',
+                    code_challenge_method: 'S256',
+                    name: 'Codex No Access Yet',
+                }).toString(),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(302);
+        expect(fakeDb.clients.find((client) => client.id === 32)?.name).toBe('Codex No Access Yet');
+        expect(fakeDb.clientAccounts).toEqual([]);
+        expect(fakeDb.authCodes).toHaveLength(1);
+    });
+
+    it('preserves existing name and mailbox mappings when auth code creation fails', async () => {
+        const fakeDb = new FakeD1Database(
+            [
+                {
+                    id: 35,
+                    name: 'Original Name',
+                    client_id: 'ez_authorize_failure',
+                    secret_hash: '',
+                    salt: '',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: JSON.stringify(['http://127.0.0.1:43111/callback']),
+                    grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+                    token_endpoint_auth_method: 'none',
+                },
+            ],
+            [],
+            [
+                { id: 1, alias: 'Primary', email_address: 'primary@example.com', status: 'active' },
+                { id: 2, alias: 'Archive', email_address: 'archive@example.com', status: 'active' },
+            ],
+            [{ mcp_client_id: 35, email_account_id: 1 }]
+        );
+        fakeDb.failAuthCodeInsert = true;
+        const env = {
+            DB: fakeDb as unknown as D1Database,
+            RATE_LIMITER: new FakeKvNamespace() as unknown as KVNamespace,
+            JWT_SECRET: 'test-jwt-secret',
+        };
+
+        const response = await app.fetch(
+            new Request('https://example.com/authorize', {
+                method: 'POST',
+                headers: {
+                    Cookie: VALID_SESSION_COOKIE,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    client_id: 'ez_authorize_failure',
+                    redirect_uri: 'http://127.0.0.1:43111/callback',
+                    state: 'state-1',
+                    code_challenge: 'abc123',
+                    code_challenge_method: 'S256',
+                    name: 'Renamed During Failed Consent',
+                    account_ids: '2',
+                }).toString(),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(302);
+        expect(fakeDb.clients.find((client) => client.id === 35)?.name).toBe('Original Name');
+        expect(fakeDb.clientAccounts).toEqual([{ mcp_client_id: 35, email_account_id: 1 }]);
+        expect(fakeDb.authCodes).toEqual([]);
+    });
+
+    it('rejects invalid mailbox ids without mutating existing grants', async () => {
+        const fakeDb = new FakeD1Database(
+            [
+                {
+                    id: 36,
+                    name: 'OpenAI Codex',
+                    client_id: 'ez_authorize_invalid_account',
+                    secret_hash: '',
+                    salt: '',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: JSON.stringify(['http://127.0.0.1:43111/callback']),
+                    grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+                    token_endpoint_auth_method: 'none',
+                },
+            ],
+            [],
+            [{ id: 1, alias: 'Primary', email_address: 'primary@example.com', status: 'active' }],
+            [{ mcp_client_id: 36, email_account_id: 1 }]
+        );
+        const env = {
+            DB: fakeDb as unknown as D1Database,
+            RATE_LIMITER: new FakeKvNamespace() as unknown as KVNamespace,
+            JWT_SECRET: 'test-jwt-secret',
+        };
+
+        const response = await app.fetch(
+            new Request('https://example.com/authorize', {
+                method: 'POST',
+                headers: {
+                    Cookie: VALID_SESSION_COOKIE,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    client_id: 'ez_authorize_invalid_account',
+                    redirect_uri: 'http://127.0.0.1:43111/callback',
+                    code_challenge: 'abc123',
+                    code_challenge_method: 'S256',
+                    name: 'OpenAI Codex',
+                    account_ids: '999',
+                }).toString(),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(400);
+        expect(fakeDb.clients.find((client) => client.id === 36)?.name).toBe('OpenAI Codex');
+        expect(fakeDb.clientAccounts).toEqual([{ mcp_client_id: 36, email_account_id: 1 }]);
+        expect(fakeDb.authCodes).toEqual([]);
+    });
+
+    it('deduplicates submitted mailbox ids before replacing grants', async () => {
+        const fakeDb = new FakeD1Database(
+            [
+                {
+                    id: 37,
+                    name: 'OpenAI Codex',
+                    client_id: 'ez_authorize_duplicate_ids',
+                    secret_hash: '',
+                    salt: '',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: JSON.stringify(['http://127.0.0.1:43111/callback']),
+                    grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+                    token_endpoint_auth_method: 'none',
+                },
+            ],
+            [],
+            [{ id: 1, alias: 'Primary', email_address: 'primary@example.com', status: 'active' }],
+            [{ mcp_client_id: 37, email_account_id: 1 }]
+        );
+        const env = {
+            DB: fakeDb as unknown as D1Database,
+            RATE_LIMITER: new FakeKvNamespace() as unknown as KVNamespace,
+            JWT_SECRET: 'test-jwt-secret',
+        };
+
+        const response = await app.fetch(
+            new Request('https://example.com/authorize', {
+                method: 'POST',
+                headers: {
+                    Cookie: VALID_SESSION_COOKIE,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams([
+                    ['client_id', 'ez_authorize_duplicate_ids'],
+                    ['redirect_uri', 'http://127.0.0.1:43111/callback'],
+                    ['code_challenge', 'abc123'],
+                    ['code_challenge_method', 'S256'],
+                    ['name', 'Codex Duplicate Request'],
+                    ['account_ids', '1'],
+                    ['account_ids', '1'],
+                ]).toString(),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(302);
+        expect(fakeDb.clients.find((client) => client.id === 37)?.name).toBe('Codex Duplicate Request');
+        expect(fakeDb.clientAccounts).toEqual([{ mcp_client_id: 37, email_account_id: 1 }]);
+        expect(fakeDb.authCodes).toHaveLength(1);
+    });
+
+    it('preserves existing grants for non-active mailboxes during re-authorization', async () => {
+        const fakeDb = new FakeD1Database(
+            [
+                {
+                    id: 38,
+                    name: 'OpenAI Codex',
+                    client_id: 'ez_authorize_inactive_grants',
+                    secret_hash: '',
+                    salt: '',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: JSON.stringify(['http://127.0.0.1:43111/callback']),
+                    grant_types: JSON.stringify(['authorization_code', 'refresh_token']),
+                    token_endpoint_auth_method: 'none',
+                },
+            ],
+            [],
+            [
+                { id: 1, alias: 'Primary', email_address: 'primary@example.com', status: 'active' },
+                { id: 2, alias: 'Revoked', email_address: 'revoked@example.com', status: 'revoked' },
+            ],
+            [
+                { mcp_client_id: 38, email_account_id: 1 },
+                { mcp_client_id: 38, email_account_id: 2 },
+            ]
+        );
+        const env = {
+            DB: fakeDb as unknown as D1Database,
+            RATE_LIMITER: new FakeKvNamespace() as unknown as KVNamespace,
+            JWT_SECRET: 'test-jwt-secret',
+        };
+
+        const response = await app.fetch(
+            new Request('https://example.com/authorize', {
+                method: 'POST',
+                headers: {
+                    Cookie: VALID_SESSION_COOKIE,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    client_id: 'ez_authorize_inactive_grants',
+                    redirect_uri: 'http://127.0.0.1:43111/callback',
+                    code_challenge: 'abc123',
+                    code_challenge_method: 'S256',
+                    name: 'Codex Reauth',
+                    account_ids: '1',
+                }).toString(),
+            }),
+            env
+        );
+
+        expect(response.status).toBe(302);
+        expect(fakeDb.clientAccounts).toEqual([
+            { mcp_client_id: 38, email_account_id: 1 },
+            { mcp_client_id: 38, email_account_id: 2 },
+        ]);
+        expect(fakeDb.authCodes).toHaveLength(1);
+    });
+
+    it('agent edit helper updates both the name and mailbox mappings', async () => {
+        const fakeDb = new FakeD1Database(
+            [
+                {
+                    id: 33,
+                    name: 'Old Name',
+                    client_id: 'ez_agent_edit',
+                    secret_hash: 'hash',
+                    salt: 'salt',
+                    is_active: 1,
+                    last_used_at: null,
+                    created_at: new Date().toISOString(),
+                    redirect_uris: '[]',
+                    grant_types: JSON.stringify(['client_credentials']),
+                    token_endpoint_auth_method: 'client_secret_post',
+                },
+            ],
+            [],
+            [
+                { id: 1, alias: 'Primary', email_address: 'primary@example.com', status: 'active' },
+                { id: 2, alias: 'Archive', email_address: 'archive@example.com', status: 'active' },
+            ],
+            [{ mcp_client_id: 33, email_account_id: 1 }]
+        );
+        await updateAgentNameAndAccounts(fakeDb as unknown as D1Database, 33, 'Codex Team Desktop', [2]);
+        expect(fakeDb.clients.find((client) => client.id === 33)?.name).toBe('Codex Team Desktop');
+        expect(fakeDb.clientAccounts).toEqual([{ mcp_client_id: 33, email_account_id: 2 }]);
     });
 
     it('rejects public authorization-code exchange when the auth code was issued without PKCE', async () => {
@@ -545,7 +1060,7 @@ describe('MCP OAuth integration routes', () => {
         await expect(response.json()).resolves.toMatchObject({ error: 'invalid_client' });
     });
 
-    it('does not auto-grant email-account access on first authorization approval', async () => {
+    it('allows first authorization approval to complete with zero mailbox mappings', async () => {
         const fakeDb = new FakeD1Database(
             [
                 {
@@ -587,6 +1102,7 @@ describe('MCP OAuth integration routes', () => {
                     redirect_uri: 'http://127.0.0.1:43111/callback',
                     code_challenge: 'challenge',
                     code_challenge_method: 'S256',
+                    name: 'OpenAI Codex',
                 }),
             }),
             env
