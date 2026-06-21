@@ -8,6 +8,7 @@ const GMAIL_SCOPES = [
     'https://mail.google.com/',
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/gmail.settings.basic',
+    'https://www.googleapis.com/auth/tasks',
 ].join(' ');
 
 export function getGoogleAuthUrl(clientId: string, redirectUri: string, state: string): string {

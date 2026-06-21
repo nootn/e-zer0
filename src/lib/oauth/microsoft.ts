@@ -7,6 +7,7 @@ const MS_SCOPES = [
     'https://graph.microsoft.com/Mail.Read',
     'https://graph.microsoft.com/Mail.ReadWrite',
     'https://graph.microsoft.com/MailboxSettings.ReadWrite',
+    'https://graph.microsoft.com/Tasks.ReadWrite',
     'https://graph.microsoft.com/User.Read',
     'offline_access',
 ].join(' ');

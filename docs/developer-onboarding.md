@@ -96,13 +96,16 @@ e-zer0/
 │   │   ├── email/
 │   │   │   ├── gmail.ts      # Gmail API client (read, modify, labels)
 │   │   │   └── outlook.ts    # Microsoft Graph API client (read, modify, folders)
+│   │   ├── tasks/
+│   │   │   ├── google.ts     # Google Tasks API client (list/create/update/delete)
+│   │   │   └── microsoft.ts  # Microsoft To Do (Graph) API client
 │   │   └── oauth/
 │   │       ├── google.ts     # Google OAuth 2.0 helpers
 │   │       └── microsoft.ts  # Microsoft OAuth 2.0 helpers
 │   │
 │   ├── mcp/                  # Model Context Protocol
 │   │   ├── server.ts         # MCP server setup + tool registration
-│   │   └── tools.ts          # MCP tool implementations (read, manage, organize emails)
+│   │   └── tools.ts          # MCP tool implementations (emails, rules/filters, tasks)
 │   │
 │   └── middleware/
 │       └── auth.ts           # Auth middleware (session check, route protection)
@@ -291,6 +294,30 @@ server.tool('my_new_tool', 'Description for AI agents', { /* zod schema */ }, as
 ```
 
 The MCP server uses the `@modelcontextprotocol/sdk` package and communicates via JSON-RPC over HTTP.
+
+---
+
+## Tasks (Google Tasks & Microsoft To Do)
+
+Alongside email, e-zer0 exposes a unified **tasks** layer over Google Tasks (Gmail accounts) and Microsoft To Do (Outlook/M365 accounts). The MCP tools — `list_task_lists`, `list_tasks`, `create_task`, `update_task`, `delete_task` — share the same account-permission and audit-logging model as the email tools, and task `title`/`notes` are run through `sanitizer.ts` before being returned.
+
+Provider differences are hidden in `src/lib/tasks/`:
+
+| Concept | Google Tasks | Microsoft To Do |
+|---------|--------------|-----------------|
+| Default list | `@default` tasklist id | list where `wellknownListName === 'defaultList'` |
+| Status | `needsAction` / `completed` | `notStarted` / `completed` (unified to `open` / `completed`) |
+| Due date | `due` (RFC3339, date honored only) | `dueDateTime: { dateTime, timeZone }` (no trailing `Z`) |
+| Notes | `notes` string | `body: { content, contentType: 'text' }` |
+
+### Required OAuth scopes
+
+These are added to the existing consent flows (see `src/lib/oauth/`):
+
+- **Google:** `https://www.googleapis.com/auth/tasks` — and the **Google Tasks API** must be enabled in Google Cloud (separate from the Gmail API).
+- **Microsoft:** `https://graph.microsoft.com/Tasks.ReadWrite`.
+
+Because these are new scopes, **existing connected accounts must be reconnected** (re-consent) before the task tools will work for them.
 
 ---
 

@@ -23,6 +23,21 @@ import {
 } from '../lib/email/outlook';
 import { indexEmailsBatch, searchSimilar, deleteFromIndex } from '../lib/vector';
 import { sanitizeEmailContent } from '../lib/sanitizer';
+import {
+    listGoogleTaskLists,
+    listGoogleTasks,
+    createGoogleTask,
+    updateGoogleTask,
+    deleteGoogleTask,
+} from '../lib/tasks/google';
+import {
+    listMsTaskLists,
+    getMsDefaultListId,
+    listMsTasks,
+    createMsTask,
+    updateMsTask,
+    deleteMsTask,
+} from '../lib/tasks/microsoft';
 
 // ── Audit Logger ────────────────────────────────────────
 
@@ -36,13 +51,47 @@ export async function logAudit(
     success: boolean,
     errorMessage?: string
 ): Promise<void> {
-    await db
-        .prepare(
-            `INSERT INTO audit_logs (client_id, client_name, action, target, details, success, error_message)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(clientId, clientName, action, target, details, success ? 1 : 0, errorMessage || null)
-        .run();
+    try {
+        await db
+            .prepare(
+                `INSERT INTO audit_logs (client_id, client_name, action, target, details, success, error_message)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+            )
+            .bind(clientId, clientName, action, target, details, success ? 1 : 0, errorMessage || null)
+            .run();
+    } catch (e) {
+        // Audit logging must never break a tool call
+        console.error('logAudit failed:', e);
+    }
+}
+
+// ── Helper: sanitize a list of email messages ───────────
+
+function sanitizeMessages(messages: any[]): any[] {
+    return messages.map((msg: any) => {
+        const subjectResult = sanitizeEmailContent(msg.subject || '');
+        const snippetResult = sanitizeEmailContent(msg.snippet || '');
+        const bodyResult = msg.body ? sanitizeEmailContent(msg.body) : null;
+        return {
+            ...msg,
+            subject: subjectResult.sanitizedText,
+            snippet: snippetResult.sanitizedText,
+            body: bodyResult?.sanitizedText ?? msg.body,
+            _security: {
+                risk_score: Math.max(subjectResult.riskScore, snippetResult.riskScore, bodyResult?.riskScore ?? 0),
+                redactions: [
+                    ...subjectResult.redactions,
+                    ...snippetResult.redactions,
+                    ...(bodyResult?.redactions ?? []),
+                ],
+                injection_warnings: [
+                    ...subjectResult.injectionWarnings,
+                    ...snippetResult.injectionWarnings,
+                    ...(bodyResult?.injectionWarnings ?? []),
+                ],
+            },
+        };
+    });
 }
 
 // ── Helper to get decrypted access token ────────────────
@@ -158,30 +207,7 @@ export async function readRecentEmails(
     }
 
     // Sanitize email content before returning (PII redaction + prompt injection detection)
-    const sanitizedMessages = messages.map((msg: any) => {
-        const subjectResult = sanitizeEmailContent(msg.subject || '');
-        const snippetResult = sanitizeEmailContent(msg.snippet || '');
-        const bodyResult = msg.body ? sanitizeEmailContent(msg.body) : null;
-        return {
-            ...msg,
-            subject: subjectResult.sanitizedText,
-            snippet: snippetResult.sanitizedText,
-            body: bodyResult?.sanitizedText ?? msg.body,
-            _security: {
-                risk_score: Math.max(subjectResult.riskScore, snippetResult.riskScore, bodyResult?.riskScore ?? 0),
-                redactions: [
-                    ...subjectResult.redactions,
-                    ...snippetResult.redactions,
-                    ...(bodyResult?.redactions ?? []),
-                ],
-                injection_warnings: [
-                    ...subjectResult.injectionWarnings,
-                    ...snippetResult.injectionWarnings,
-                    ...(bodyResult?.injectionWarnings ?? []),
-                ],
-            },
-        };
-    });
+    const sanitizedMessages = sanitizeMessages(messages);
 
     return { account_id: accountId, provider: account.provider, messages: sanitizedMessages };
 }
@@ -232,30 +258,7 @@ export async function getEmails(
     }
 
     // Sanitize email content before returning (PII redaction + prompt injection detection)
-    const sanitizedMessages = messages.map((msg: any) => {
-        const subjectResult = sanitizeEmailContent(msg.subject || '');
-        const snippetResult = sanitizeEmailContent(msg.snippet || '');
-        const bodyResult = msg.body ? sanitizeEmailContent(msg.body) : null;
-        return {
-            ...msg,
-            subject: subjectResult.sanitizedText,
-            snippet: snippetResult.sanitizedText,
-            body: bodyResult?.sanitizedText ?? msg.body,
-            _security: {
-                risk_score: Math.max(subjectResult.riskScore, snippetResult.riskScore, bodyResult?.riskScore ?? 0),
-                redactions: [
-                    ...subjectResult.redactions,
-                    ...snippetResult.redactions,
-                    ...(bodyResult?.redactions ?? []),
-                ],
-                injection_warnings: [
-                    ...subjectResult.injectionWarnings,
-                    ...snippetResult.injectionWarnings,
-                    ...(bodyResult?.injectionWarnings ?? []),
-                ],
-            },
-        };
-    });
+    const sanitizedMessages = sanitizeMessages(messages);
 
     return { account_id: accountId, provider: account.provider, messages: sanitizedMessages };
 }
@@ -341,7 +344,7 @@ export async function searchEmailsSemantic(
 
     // Fetch full message details for top results
     const enrichedResults = [];
-    for (const result of results.slice(0, 5)) {
+    for (const result of results.slice(0, Math.min(topK, 10))) {
         try {
             const { account, accessToken } = await getAccountToken(
                 env.DB,
@@ -473,7 +476,7 @@ export async function createEmailRule(
             actionObj.addLabelIds = [await resolveGmailLabelId(accessToken, actions.moveToFolder, true)];
             actionObj.removeLabelIds = [...(actionObj.removeLabelIds || []), 'INBOX'];
         }
-        if (actions.delete) actionObj.addLabelIds = ['TRASH'];
+        if (actions.delete) actionObj.addLabelIds = [...(actionObj.addLabelIds || []), 'TRASH'];
 
         const filter = await createGmailFilter(accessToken, criteria, actionObj);
 
@@ -573,4 +576,177 @@ export async function deleteEmailRule(env: Env, clientId: string, accountId: num
     }
 
     return { success: true, account_id: accountId, rule_id: ruleId };
+}
+
+// ── Task Helpers ────────────────────────────────────────
+
+function normalizeDue(due?: string): string | undefined {
+    if (!due) return undefined;
+    const d = new Date(due);
+    if (isNaN(d.getTime())) return undefined;
+    return d.toISOString();
+}
+
+// Unify a provider task into a sanitized shape with _security metadata.
+function unifyTask(task: {
+    id: string;
+    title: string;
+    notes?: string;
+    status: string;
+    due?: string;
+    completed?: string;
+    updated?: string;
+}): any {
+    const status = task.status === 'completed' ? 'completed' : 'open';
+    const titleResult = sanitizeEmailContent(task.title || '');
+    const notesResult = task.notes ? sanitizeEmailContent(task.notes) : null;
+    return {
+        id: task.id,
+        title: titleResult.sanitizedText,
+        notes: notesResult?.sanitizedText,
+        status,
+        due: task.due,
+        completed_at: task.completed,
+        updated: task.updated,
+        _security: {
+            risk_score: Math.max(titleResult.riskScore, notesResult?.riskScore ?? 0),
+            redactions: [...titleResult.redactions, ...(notesResult?.redactions ?? [])],
+            injection_warnings: [...titleResult.injectionWarnings, ...(notesResult?.injectionWarnings ?? [])],
+        },
+    };
+}
+
+// ── Tool: list_task_lists ───────────────────────────────
+
+export async function listTaskLists(env: Env, clientId: string, accountId: number): Promise<any> {
+    const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
+
+    if (account.provider === 'google') {
+        const lists = await listGoogleTaskLists(accessToken);
+        return { account_id: accountId, provider: 'google', task_lists: lists };
+    } else {
+        const lists = await listMsTaskLists(accessToken);
+        return {
+            account_id: accountId,
+            provider: 'microsoft',
+            task_lists: lists.map((l) => ({ id: l.id, title: l.title })),
+        };
+    }
+}
+
+// ── Tool: list_tasks ────────────────────────────────────
+
+export async function listTasks(
+    env: Env,
+    clientId: string,
+    accountId: number,
+    listId?: string,
+    includeCompleted = false,
+    count?: number
+): Promise<any> {
+    const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
+
+    if (account.provider === 'google') {
+        const resolved = listId || '@default';
+        const tasks = await listGoogleTasks(accessToken, resolved, includeCompleted, count);
+        return { account_id: accountId, provider: 'google', list_id: resolved, tasks: tasks.map(unifyTask) };
+    } else {
+        const resolved = listId || (await getMsDefaultListId(accessToken));
+        const tasks = await listMsTasks(accessToken, resolved, includeCompleted, count);
+        return { account_id: accountId, provider: 'microsoft', list_id: resolved, tasks: tasks.map(unifyTask) };
+    }
+}
+
+// ── Tool: create_task ───────────────────────────────────
+
+export async function createTask(
+    env: Env,
+    clientId: string,
+    accountId: number,
+    title: string,
+    notes?: string,
+    due?: string,
+    listId?: string
+): Promise<any> {
+    const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
+    const dueIso = normalizeDue(due);
+
+    if (account.provider === 'google') {
+        const resolved = listId || '@default';
+        const task = await createGoogleTask(accessToken, resolved, { title, notes, due: dueIso });
+        return { success: true, account_id: accountId, provider: 'google', list_id: resolved, task: unifyTask(task) };
+    } else {
+        const resolved = listId || (await getMsDefaultListId(accessToken));
+        const task = await createMsTask(accessToken, resolved, { title, notes, due: dueIso });
+        return {
+            success: true,
+            account_id: accountId,
+            provider: 'microsoft',
+            list_id: resolved,
+            task: unifyTask(task),
+        };
+    }
+}
+
+// ── Tool: update_task ───────────────────────────────────
+
+export async function updateTask(
+    env: Env,
+    clientId: string,
+    accountId: number,
+    taskId: string,
+    updates: { title?: string; notes?: string; due?: string; status?: 'open' | 'completed' },
+    listId?: string
+): Promise<any> {
+    const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
+    const dueIso = updates.due !== undefined ? normalizeDue(updates.due) : undefined;
+
+    if (account.provider === 'google') {
+        const resolved = listId || '@default';
+        const status = updates.status ? (updates.status === 'completed' ? 'completed' : 'needsAction') : undefined;
+        const task = await updateGoogleTask(accessToken, resolved, taskId, {
+            title: updates.title,
+            notes: updates.notes,
+            due: dueIso,
+            status,
+        });
+        return { success: true, account_id: accountId, provider: 'google', list_id: resolved, task: unifyTask(task) };
+    } else {
+        const resolved = listId || (await getMsDefaultListId(accessToken));
+        const status = updates.status ? (updates.status === 'completed' ? 'completed' : 'notStarted') : undefined;
+        const task = await updateMsTask(accessToken, resolved, taskId, {
+            title: updates.title,
+            notes: updates.notes,
+            due: dueIso,
+            status,
+        });
+        return {
+            success: true,
+            account_id: accountId,
+            provider: 'microsoft',
+            list_id: resolved,
+            task: unifyTask(task),
+        };
+    }
+}
+
+// ── Tool: delete_task ───────────────────────────────────
+
+export async function deleteTask(
+    env: Env,
+    clientId: string,
+    accountId: number,
+    taskId: string,
+    listId?: string
+): Promise<any> {
+    const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
+
+    if (account.provider === 'google') {
+        await deleteGoogleTask(accessToken, listId || '@default', taskId);
+    } else {
+        const resolved = listId || (await getMsDefaultListId(accessToken));
+        await deleteMsTask(accessToken, resolved, taskId);
+    }
+
+    return { success: true, account_id: accountId, task_id: taskId };
 }

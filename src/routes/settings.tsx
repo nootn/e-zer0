@@ -59,7 +59,8 @@ settings.get('/', async (c) => {
                             </h3>
                             <ul style="font-size:13px; color:var(--text-secondary); line-height:1.8; padding-left:18px; margin:0; list-style:disc;">
                                 <li>
-                                    Enable the <strong>Gmail API</strong> in Google Cloud.
+                                    Enable the <strong>Gmail API</strong> and <strong>Google Tasks API</strong> in
+                                    Google Cloud.
                                 </li>
                                 <li>
                                     Create an <strong>OAuth Client ID</strong> (Web application).
@@ -94,6 +95,17 @@ settings.get('/', async (c) => {
                                         and click <strong>Enable</strong>.
                                     </li>
                                     <li>
+                                        Then enable the{' '}
+                                        <a
+                                            href="https://console.cloud.google.com/apis/library/tasks.googleapis.com"
+                                            target="_blank"
+                                            style="color:var(--accent-hover);"
+                                        >
+                                            Google Tasks API
+                                        </a>{' '}
+                                        (needed for task management).
+                                    </li>
+                                    <li>
                                         Go to{' '}
                                         <a
                                             href="https://console.cloud.google.com/apis/credentials"
@@ -118,9 +130,9 @@ settings.get('/', async (c) => {
                                                 App name: <code style="color:var(--accent-hover);">e-zer0</code>
                                             </li>
                                             <li>
-                                                Add scopes: <strong>Gmail API</strong> →{' '}
-                                                <code>https://mail.google.com/</code> and{' '}
-                                                <code>https://www.googleapis.com/auth/gmail.settings.basic</code>
+                                                Add scopes: <code>https://mail.google.com/</code>,{' '}
+                                                <code>https://www.googleapis.com/auth/gmail.settings.basic</code>, and{' '}
+                                                <code>https://www.googleapis.com/auth/tasks</code> (for Google Tasks)
                                             </li>
                                             <li>
                                                 Add your email as a <strong>test user</strong>
@@ -255,6 +267,11 @@ settings.get('/', async (c) => {
                                         <code style="color:var(--accent-hover);">MailboxSettings.ReadWrite</code>{' '}
                                         <strong style="color:var(--accent-hover);">★</strong> — manage inbox rules
                                         (list, create, update, delete)
+                                    </li>
+                                    <li>
+                                        <code style="color:var(--accent-hover);">Tasks.ReadWrite</code>{' '}
+                                        <strong style="color:var(--accent-hover);">★</strong> — manage Microsoft To Do
+                                        tasks (list, create, update, delete)
                                     </li>
                                     <li>
                                         <code>User.Read</code> — sign in &amp; get email address
