@@ -19,10 +19,10 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
 
             - name: Setup Node.js
-              uses: actions/setup-node@v4
+              uses: actions/setup-node@v5
               with:
                   node-version: '22'
                   cache: 'npm'
@@ -111,7 +111,7 @@ jobs:
                       build-mode: none
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
 
             - name: Initialize CodeQL
               uses: github/codeql-action/init@v4
@@ -133,7 +133,7 @@ jobs:
             image: semgrep/semgrep:latest
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
 
             - name: Run Semgrep
               id: semgrep_scan
@@ -165,10 +165,10 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
 
             - name: Setup Node.js
-              uses: actions/setup-node@v4
+              uses: actions/setup-node@v5
               with:
                   node-version: '22'
                   cache: 'npm'
@@ -206,7 +206,7 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout (full history)
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
               with:
                   fetch-depth: 0
 
@@ -240,7 +240,7 @@ jobs:
         needs: security-platform-eligibility
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
 
             - name: Install Trivy
               run: |
