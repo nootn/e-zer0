@@ -28,15 +28,15 @@
         "security": "npm run security:audit && npm run security:deps && npm run security:secrets && npm run security:semgrep && npm run security:trivy"
     },
     "dependencies": {
-        "@modelcontextprotocol/sdk": "^1.27.1",
-        "hono": "^4.12.3",
-        "zod": "^4.3.6"
+        "@modelcontextprotocol/sdk": "^1.29.0",
+        "hono": "^4.12.26",
+        "zod": "^4.4.3"
     },
     "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260503.1",
-        "prettier": "^3.8.1",
-        "typescript": "^5.9.3",
-        "vitest": "^4.0.18",
-        "wrangler": "^4.69.0"
+        "@cloudflare/workers-types": "^4.20260621.1",
+        "prettier": "^3.8.4",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.9",
+        "wrangler": "^4.103.0"
     }
 }
