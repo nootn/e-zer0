@@ -25,24 +25,58 @@ if (fs.existsSync('.dev.vars')) {
     devVars = fs.readFileSync('.dev.vars', 'utf8');
 }
 
-let encryptionKey = '';
-let jwtSecret = '';
+const SECRET_HEX_RE = /^[0-9a-f]{64}$/i;
+const PLACEHOLDER_SECRET_RE = /^<replace-with-64-char-hex-string>$/i;
 
-const encMatch = devVars.match(/^ENCRYPTION_KEY=(.+)$/m);
-if (encMatch) encryptionKey = encMatch[1].trim();
-else encryptionKey = crypto.randomBytes(32).toString('hex');
+function randomSecret() {
+    return crypto.randomBytes(32).toString('hex');
+}
 
-const jwtMatch = devVars.match(/^JWT_SECRET=(.+)$/m);
-if (jwtMatch) jwtSecret = jwtMatch[1].trim();
-else jwtSecret = crypto.randomBytes(32).toString('hex');
+function readSecret(name) {
+    const match = devVars.match(new RegExp(`^${name}=(.*)$`, 'm'));
+    return match ? match[1].trim() : null;
+}
 
-if (!encMatch || !jwtMatch) {
-    console.log('Generating new keys and saving to .dev.vars...');
-    const newDevVars = `ENCRYPTION_KEY=${encryptionKey}\nJWT_SECRET=${jwtSecret}\n`;
+function upsertDevVar(contents, name, value) {
+    const line = `${name}=${value}`;
+    if (new RegExp(`^${name}=.*$`, 'm').test(contents)) {
+        return contents.replace(new RegExp(`^${name}=.*$`, 'm'), line);
+    }
+
+    const separator = contents.length > 0 && !contents.endsWith('\n') ? '\n' : '';
+    return `${contents}${separator}${line}\n`;
+}
+
+function resolveSecret(name) {
+    const value = readSecret(name);
+
+    if (!value || PLACEHOLDER_SECRET_RE.test(value)) {
+        return { value: randomSecret(), shouldWrite: true };
+    }
+
+    if (!SECRET_HEX_RE.test(value)) {
+        console.error(`Error: ${name} must be a 64-character hexadecimal string.`);
+        console.error('Run `npm run setup-cf` with placeholders or missing values to generate new secrets automatically.');
+        process.exit(1);
+    }
+
+    return { value, shouldWrite: false };
+}
+
+const encryptionSecret = resolveSecret('ENCRYPTION_KEY');
+const jwtSecretValue = resolveSecret('JWT_SECRET');
+let encryptionKey = encryptionSecret.value;
+let jwtSecret = jwtSecretValue.value;
+
+if (encryptionSecret.shouldWrite || jwtSecretValue.shouldWrite) {
+    console.log('Generating missing or placeholder keys and saving to .dev.vars...');
+    let newDevVars = devVars;
+    newDevVars = upsertDevVar(newDevVars, 'ENCRYPTION_KEY', encryptionKey);
+    newDevVars = upsertDevVar(newDevVars, 'JWT_SECRET', jwtSecret);
     fs.writeFileSync('.dev.vars', newDevVars);
-    console.log('✅ .dev.vars created with ENCRYPTION_KEY and JWT_SECRET');
+    console.log('✅ .dev.vars has valid ENCRYPTION_KEY and JWT_SECRET values');
 } else {
-    console.log('✅ .dev.vars already has both keys — no changes needed.');
+    console.log('✅ .dev.vars already has valid ENCRYPTION_KEY and JWT_SECRET values — no changes needed.');
 }
 
 // ── Step 2: Check if we can reach Cloudflare (optional for local dev) ───
