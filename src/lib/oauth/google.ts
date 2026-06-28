@@ -5,7 +5,8 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';
 
 const GMAIL_SCOPES = [
-    'https://mail.google.com/',
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/gmail.modify',
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/gmail.settings.basic',
     'https://www.googleapis.com/auth/tasks',
