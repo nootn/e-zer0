@@ -134,6 +134,16 @@ describe('encrypt / decrypt', () => {
         const decrypted = await decrypt(encrypted, testKey);
         expect(decrypted).toBe(text);
     });
+
+    it('rejects placeholder encryption keys', async () => {
+        await expect(encrypt('test', '<replace-with-64-char-hex-string>')).rejects.toThrow(
+            'ENCRYPTION_KEY must be a 64-character hexadecimal string'
+        );
+    });
+
+    it('rejects malformed ciphertext hex', async () => {
+        await expect(decrypt('not-hex', testKey)).rejects.toThrow('Invalid hexadecimal string');
+    });
 });
 
 // ── Token Generation ────────────────────────────────────

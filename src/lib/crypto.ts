@@ -14,6 +14,10 @@ function bufferToHex(buffer: ArrayBuffer): string {
 }
 
 function hexToBuffer(hex: string): ArrayBuffer {
+    if (hex.length % 2 !== 0 || !/^[0-9a-f]*$/i.test(hex)) {
+        throw new Error('Invalid hexadecimal string');
+    }
+
     const bytes = new Uint8Array(hex.length / 2);
     for (let i = 0; i < hex.length; i += 2) {
         bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
@@ -59,7 +63,11 @@ export async function verifyPassword(password: string, hash: string, salt: strin
 // ── AES-GCM Encryption ─────────────────────────────────
 
 async function getAesKey(keyHex: string): Promise<CryptoKey> {
-    const keyBytes = new Uint8Array(hexToBuffer(keyHex.substring(0, 64))); // Use first 32 bytes
+    if (!/^[0-9a-f]{64}$/i.test(keyHex)) {
+        throw new Error('ENCRYPTION_KEY must be a 64-character hexadecimal string');
+    }
+
+    const keyBytes = new Uint8Array(hexToBuffer(keyHex));
     return crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
 
