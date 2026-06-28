@@ -485,26 +485,37 @@ export async function deleteOutlookRule(accessToken: string, ruleId: string): Pr
     });
 }
 
+function quoteKqlSearchValue(value: string): string {
+    if (/[\\"\x00-\x1f\x7f]/.test(value)) {
+        throw new Error('Retroactive rule conditions cannot contain quotes, backslashes, or control characters');
+    }
+    return `"${value}"`;
+}
+
+function buildKqlSearchClause(field: string | undefined, values?: string[]): string | undefined {
+    const quotedValues = values
+        ?.map((value) => value.trim())
+        .filter(Boolean)
+        .map(quoteKqlSearchValue);
+    if (!quotedValues || quotedValues.length === 0) return undefined;
+
+    const terms = quotedValues.map((value) => (field ? `${field}:${value}` : value));
+    return terms.length === 1 ? terms[0] : `(${terms.join(' OR ')})`;
+}
+
 export async function applyRuleToExistingOutlook(
     accessToken: string,
     conditions: any,
     actions: any,
     maxResults = 100
 ): Promise<void> {
-    // 1. Build search query (KQL format for Graph API)
-    const queryParts: string[] = [];
-    if (conditions.from && conditions.from.length > 0) {
-        queryParts.push(`from:(${conditions.from.join(' OR ')})`);
-    }
-    if (conditions.to && conditions.to.length > 0) {
-        queryParts.push(`to:(${conditions.to.join(' OR ')})`);
-    }
-    if (conditions.subject && conditions.subject.length > 0) {
-        queryParts.push(`subject:(${conditions.subject.join(' OR ')})`);
-    }
-    if (conditions.body && conditions.body.length > 0) {
-        queryParts.push(`(${conditions.body.join(' OR ')})`);
-    }
+    // 1. Build a KQL search query with all condition values quoted as literals.
+    const queryParts = [
+        buildKqlSearchClause('from', conditions.from),
+        buildKqlSearchClause('to', conditions.to),
+        buildKqlSearchClause('subject', conditions.subject),
+        buildKqlSearchClause(undefined, conditions.body),
+    ].filter((part): part is string => Boolean(part));
 
     const q = queryParts.join(' AND ');
     if (!q) return;

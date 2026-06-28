@@ -327,26 +327,37 @@ export async function deleteGmailFilter(accessToken: string, filterId: string): 
     });
 }
 
+function quoteGmailSearchValue(value: string): string {
+    if (/[\\"\x00-\x1f\x7f]/.test(value)) {
+        throw new Error('Retroactive rule conditions cannot contain quotes, backslashes, or control characters');
+    }
+    return `"${value}"`;
+}
+
+function buildGmailSearchClause(field: string | undefined, values?: string[]): string | undefined {
+    const quotedValues = values
+        ?.map((value) => value.trim())
+        .filter(Boolean)
+        .map(quoteGmailSearchValue);
+    if (!quotedValues || quotedValues.length === 0) return undefined;
+
+    const terms = quotedValues.map((value) => (field ? `${field}:${value}` : value));
+    return terms.length === 1 ? terms[0] : `{${terms.join(' ')}}`;
+}
+
 export async function applyRuleToExistingGmail(
     accessToken: string,
     conditions: any,
     actions: any,
     maxResults = 500
 ): Promise<void> {
-    // 1. Build search query
-    const queryParts: string[] = [];
-    if (conditions.from && conditions.from.length > 0) {
-        queryParts.push(`from:(${conditions.from.join(' OR ')})`);
-    }
-    if (conditions.to && conditions.to.length > 0) {
-        queryParts.push(`to:(${conditions.to.join(' OR ')})`);
-    }
-    if (conditions.subject && conditions.subject.length > 0) {
-        queryParts.push(`subject:(${conditions.subject.join(' OR ')})`);
-    }
-    if (conditions.body && conditions.body.length > 0) {
-        queryParts.push(`(${conditions.body.join(' OR ')})`);
-    }
+    // 1. Build a Gmail search query with all condition values quoted as literals.
+    const queryParts = [
+        buildGmailSearchClause('from', conditions.from),
+        buildGmailSearchClause('to', conditions.to),
+        buildGmailSearchClause('subject', conditions.subject),
+        buildGmailSearchClause(undefined, conditions.body),
+    ].filter((part): part is string => Boolean(part));
 
     const q = queryParts.join(' ');
     if (!q) return;
