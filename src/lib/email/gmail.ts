@@ -32,6 +32,10 @@ async function gmailFetch(accessToken: string, path: string, options?: RequestIn
     return res.json();
 }
 
+function encodeGmailPathSegment(segment: string): string {
+    return encodeURIComponent(segment);
+}
+
 function decodeHeader(headers: any[], name: string): string {
     const h = headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase());
     return h?.value || '';
@@ -51,7 +55,7 @@ export async function listGmailMessages(
     for (const msg of list.messages) {
         const full = await gmailFetch(
             accessToken,
-            `/messages/${msg.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Date`
+            `/messages/${encodeGmailPathSegment(msg.id)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Date`
         );
         messages.push({
             id: full.id,
@@ -122,7 +126,7 @@ export async function searchGmailMessages(accessToken: string, options: GetEmail
     for (const msg of list.messages) {
         const full = await gmailFetch(
             accessToken,
-            `/messages/${msg.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Date`
+            `/messages/${encodeGmailPathSegment(msg.id)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Date`
         );
         messages.push({
             id: full.id,
@@ -140,7 +144,7 @@ export async function searchGmailMessages(accessToken: string, options: GetEmail
 }
 
 export async function getGmailMessage(accessToken: string, messageId: string): Promise<EmailMessage> {
-    const full = await gmailFetch(accessToken, `/messages/${messageId}?format=full`);
+    const full = await gmailFetch(accessToken, `/messages/${encodeGmailPathSegment(messageId)}?format=full`);
     const headers = full.payload.headers;
 
     let body = '';
@@ -172,14 +176,14 @@ export async function modifyGmailMessage(
     addLabels: string[] = [],
     removeLabels: string[] = []
 ): Promise<void> {
-    await gmailFetch(accessToken, `/messages/${messageId}/modify`, {
+    await gmailFetch(accessToken, `/messages/${encodeGmailPathSegment(messageId)}/modify`, {
         method: 'POST',
         body: JSON.stringify({ addLabelIds: addLabels, removeLabelIds: removeLabels }),
     });
 }
 
 export async function deleteGmailMessage(accessToken: string, messageId: string): Promise<void> {
-    await gmailFetch(accessToken, `/messages/${messageId}/trash`, { method: 'POST' });
+    await gmailFetch(accessToken, `/messages/${encodeGmailPathSegment(messageId)}/trash`, { method: 'POST' });
 }
 
 // ── Label Management ────────────────────────────────────
@@ -322,7 +326,7 @@ export async function createGmailFilter(
 }
 
 export async function deleteGmailFilter(accessToken: string, filterId: string): Promise<void> {
-    await gmailFetch(accessToken, `/settings/filters/${filterId}`, {
+    await gmailFetch(accessToken, `/settings/filters/${encodeGmailPathSegment(filterId)}`, {
         method: 'DELETE',
     });
 }

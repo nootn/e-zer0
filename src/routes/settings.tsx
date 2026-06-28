@@ -130,7 +130,8 @@ settings.get('/', async (c) => {
                                                 App name: <code style="color:var(--accent-hover);">e-zer0</code>
                                             </li>
                                             <li>
-                                                Add scopes: <code>https://mail.google.com/</code>,{' '}
+                                                Add scopes: <code>https://www.googleapis.com/auth/gmail.readonly</code>,{' '}
+                                                <code>https://www.googleapis.com/auth/gmail.modify</code>,{' '}
                                                 <code>https://www.googleapis.com/auth/gmail.settings.basic</code>, and{' '}
                                                 <code>https://www.googleapis.com/auth/tasks</code> (for Google Tasks)
                                             </li>
