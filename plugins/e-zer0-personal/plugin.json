@@ -1,0 +1,19 @@
+{
+    "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+    "name": "e-zer0-personal",
+    "version": "0.1.0",
+    "description": "Connect ChatGPT to your personal e-zer0 email bridge using OAuth and explicit mailbox permissions.",
+    "author": { "name": "nootn" },
+    "extensions": {
+        "com.openai": {
+            "interface": {
+                "displayName": "e-zer0 Personal",
+                "shortDescription": "Your permitted email accounts",
+                "longDescription": "Search, read, and manage email through your personal e-zer0 instance. Connect with OAuth and select the mailboxes this client may access on the e-zer0 consent page.",
+                "developerName": "nootn",
+                "category": "Productivity",
+                "defaultPrompt": "List the email accounts I have permitted this e-zer0 connection to access."
+            }
+        }
+    }
+}
