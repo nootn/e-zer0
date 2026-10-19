@@ -1,16 +1,62 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import mcp from './mcp';
+import app from '../app';
 import type { Env } from '../types';
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+});
+
+it.each(['/mcp', '/mcp/', '/mcp/sse'])('rejects unsupported SSE GETs at %s without authenticating', async (path) => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const result = await app.fetch(
+        new Request(`https://example.com${path}`, {
+            headers: { Accept: 'text/event-stream', Authorization: 'Bearer synthetic-invalid-token' },
+        }),
+        { RATE_LIMITER: {} } as Env
+    );
+    expect(result.status).toBe(405);
+    expect(result.headers.get('Allow')).toBe('POST');
+    expect(result.headers.get('X-Ezer0-Request-Id')).toBeTruthy();
+    await result.body?.cancel();
+});
+
+it('serves public health independently of MCP, database access and dashboard authentication', async () => {
+    const result = await app.fetch(new Request('https://example.com/health'), { RATE_LIMITER: {} } as Env);
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual({ status: 'ok' });
+});
+
+it('does not reconnect when the SDK probes the unsupported SSE endpoint', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.useFakeTimers();
+    let requests = 0;
+    const transport = new StreamableHTTPClientTransport(new URL('https://example.com/mcp'), {
+        fetch: async (input, init) => {
+            requests++;
+            return app.fetch(new Request(input, init), { RATE_LIMITER: {} } as Env);
+        },
+    });
+    try {
+        await transport.start();
+        await transport.resumeStream('synthetic-event');
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(requests).toBe(1);
+    } finally {
+        await transport.close();
+    }
+});
 
 it('does not report completion or failure when a pending provider stream is cancelled', async () => {
     const logs: string[] = [];
     vi.spyOn(console, 'log').mockImplementation((value) => logs.push(String(value)));
-    mcp.get('/test-pending', () => new Response(new ReadableStream()));
+    mcp.post('/test-pending', () => new Response(new ReadableStream()));
     const app = new Hono<{ Bindings: Env }>().route('/mcp', mcp);
-    const result = await app.fetch(new Request('https://example.com/mcp/test-pending'), {} as Env);
+    const result = await app.fetch(new Request('https://example.com/mcp/test-pending', { method: 'POST' }), {} as Env);
+    expect(result.status).toBe(200);
     await Promise.resolve();
     await result.body!.cancel();
     await Promise.resolve();

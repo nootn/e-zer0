@@ -48,6 +48,9 @@ app.use('/setup/*', csrfProtection);
 app.use('/login', csrfProtection);
 app.use('/logout', csrfProtection);
 
+// Liveness only: avoid database/session work and keep health checks off the MCP transport.
+app.get('/health', (c) => c.json({ status: 'ok' }));
+
 // Global auth middleware
 app.use('*', authMiddleware);
 
