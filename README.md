@@ -3,6 +3,9 @@
 See [Safe email labels and filters](docs/email-labels-and-filters.md) for preview-first
 Gmail management, provider differences, retry safety and required migrations.
 
+Before running unattended agents, read the [agent operating guide](docs/integrations/AGENT_OPERATING_GUIDE.md)
+for request budgets, keepalives, bounded retries, quota cooldowns and incremental scans.
+
 e-zer0 is a self-hosted, secure bridge between your AI agents and your email accounts. It allows you to give AI tools (like Claude Desktop or custom agents) the ability to read, search, and manage your emails across Gmail, Microsoft 365, and Outlook—without ever handing over your raw email credentials.
 
 ## Why does this exist?
@@ -95,7 +98,7 @@ e-zer0 requires **only your Cloudflare credentials** to deploy. Everything else 
 
 e-zer0 is designed to run entirely on Cloudflare's edge network, taking advantage of Workers, D1 (SQL), and Vectorize (Vector Database).
 
-- **The Free Tier:** For personal use (1 user, a few agents, standard email volume), Cloudflare's Free tier is more than enough. It includes 100,000 Worker requests per day, 5 million D1 reads/100k writes per day, and free AI embedding generation.
+- **The Free Tier:** It can suit light personal use, but all agents share the account's 100,000 daily Worker requests. Discovery, initialisation, keepalives, retries and health checks count too; mailbox count alone does not predict usage. See the [agent operating guide](docs/integrations/AGENT_OPERATING_GUIDE.md) and [current Cloudflare limits](https://developers.cloudflare.com/workers/platform/limits/) before scheduling unattended work. D1, Workers AI and Vectorize have separate allowances.
 - **The Paid Tier ($5/mo):** If you are processing a massive volume of emails or have highly active autonomous agents querying the system constantly, upgrading to the Workers Paid plan drastically increases these limits.
 
 ## 🚀 One-Click Deployment

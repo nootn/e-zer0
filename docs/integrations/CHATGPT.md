@@ -1,5 +1,8 @@
 # Connecting e-zer0 to ChatGPT
 
+For scheduled assistants, follow the [agent operating guide](AGENT_OPERATING_GUIDE.md).
+It covers incremental reads, request budgets and safe handling of retries and uncertain writes.
+
 Use the existing deployed MCP server. You do not need a new e-zer0 deployment,
 manual agent credentials or a bearer-token environment variable for OAuth.
 

@@ -485,6 +485,52 @@ settings.get('/', async (c) => {
                     </p>
                 </Card>
             </div>
+            <div style="margin-top:24px;">
+                <Card title="Agent Request Budgets and Retries">
+                    <p style="font-size:13px; color:var(--text-secondary);">
+                        All agents share the Worker request budget. Discovery, initialisation, pings, failed requests
+                        and health checks count, not just email reads. One session pinging every 180 seconds costs about
+                        480 requests/day; every 1800 seconds costs 48/day. Multiply by concurrent sessions. Reuse
+                        connections and reduce idle keepalives only through supported client settings. Use POST{' '}
+                        <code>{appUrl}/mcp</code>; 405 on an SSE GET means that stream is unsupported, not that POST
+                        calls are broken. Use <code>{appUrl}/health</code> sparingly for liveness only.
+                    </p>
+                    <ul style="font-size:13px; color:var(--text-secondary); line-height:1.8; padding-left:18px;">
+                        <li>
+                            Bound transient retries with backoff and jitter; honour Retry-After and defer if the delay
+                            exceeds the run budget. Do not stack retry loops. After one failed MCP authentication
+                            recovery, pause and request sign-in. A mailbox-provider invalid_grant instead requires
+                            reconnecting that mailbox, not repeatedly refreshing MCP credentials.
+                        </li>
+                        <li>
+                            Confirmed Cloudflare error 1027 means daily request exhaustion: pause traffic to this
+                            instance, including keepalives and scheduled retries, until the next midnight UTC plus
+                            jitter or operator-confirmed recovery. Persist the cooldown across runs where supported.
+                            Other 429 responses may be short-term rate limits; do not assume they are error 1027.
+                        </li>
+                        <li>
+                            Avoid overlapping runs. Search for duplicate alerts only when there is a new candidate. Use
+                            bounded date windows, successful checkpoints and deduplicated message IDs rather than
+                            rereading the unread backlog. Report partial coverage; do not advance checkpoints past
+                            failed pages. Verify grants with account-list tools, not private message reads.
+                        </li>
+                        <li>
+                            Agree read/write budgets before large cleanups. Moves and read-state changes currently take
+                            one message per call; no generic bulk tool is exposed. Do not create broad rules just to
+                            save calls. Reconcile uncertain writes before retrying, especially drafts and moves.
+                        </li>
+                    </ul>
+                    <p style="font-size:13px; color:var(--text-secondary);">
+                        These are client operating policies, not server-enforced limits. An assistant cannot change
+                        hidden retries, keepalives or timeouts by promising to wait longer; report controls that are
+                        unavailable. Preserve permission and approval boundaries. See the{' '}
+                        <a href="https://github.com/nootn/e-zer0/blob/main/docs/integrations/AGENT_OPERATING_GUIDE.md">
+                            agent operating guide
+                        </a>{' '}
+                        and <a href="https://developers.cloudflare.com/workers/platform/limits/">Cloudflare limits</a>.
+                    </p>
+                </Card>
+            </div>
         </Layout>
     );
 });

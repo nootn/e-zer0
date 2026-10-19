@@ -1,5 +1,7 @@
 # Integrating e-zer0 with OpenAI Codex
 
+Before unattended use, follow the [agent operating guide](AGENT_OPERATING_GUIDE.md).
+
 e-zer0 exposes a remote MCP server over Streamable HTTP, so Codex can connect to it directly without a local bridge.
 
 ## Step-by-Step Setup
@@ -20,9 +22,9 @@ e-zer0 exposes a remote MCP server over Streamable HTTP, so Codex can connect to
 
 4. On the e-zer0 authorization page:
 
-   - review or change the `Agent Name`
-   - choose the `Permitted Email Accounts`
-   - optionally leave all accounts unselected if you only want to complete sign-in for now
+    - review or change the `Agent Name`
+    - choose the `Permitted Email Accounts`
+    - optionally leave all accounts unselected if you only want to complete sign-in for now
 
 5. Verify the connection:
 

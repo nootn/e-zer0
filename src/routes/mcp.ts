@@ -416,9 +416,8 @@ const handleMcpConnection = async (c: Context<{ Bindings: Env }>) => {
 
 mcp.post('/', handleMcpConnection);
 mcp.post('/sse', handleMcpConnection);
-mcp.get('/sse', (c) => {
-    // Legacy SSE transport is not supported. This server uses Streamable HTTP (POST /mcp).
-    // Returning 405 immediately prevents the Worker from hanging on long-lived SSE GET requests.
+mcp.get('*', (c) => {
+    // JSON health responses here cause SSE clients to reconnect; health lives at /health.
     return c.json(
         {
             error: 'SSE transport not supported. Use Streamable HTTP: POST /mcp with MCP-Protocol-Version: 2025-03-26 or later.',
@@ -426,31 +425,6 @@ mcp.get('/sse', (c) => {
         405,
         { Allow: 'POST' }
     );
-});
-
-// ── Health check ────────────────────────────────────────
-mcp.get('/', async (c) => {
-    // Restrict verbosity for unauthenticated users (finding #11)
-    const authHeader = c.req.header('Authorization');
-    let isAuthenticated = false;
-    if (authHeader?.startsWith('Bearer ')) {
-        const payload = await verifyJwt(authHeader.substring(7), c.env.JWT_SECRET!);
-        if (payload && payload.type !== 'refresh') isAuthenticated = true;
-    }
-
-    if (!isAuthenticated) {
-        return c.json({ status: 'ok' });
-    }
-
-    return c.json({
-        name: 'e-zer0 MCP Server',
-        version: '1.1.1',
-        transport: 'streamable-http',
-        endpoints: {
-            token: '/mcp/token',
-            mcp: '/mcp/',
-        },
-    });
 });
 
 export default mcp;

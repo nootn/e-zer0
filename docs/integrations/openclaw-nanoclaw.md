@@ -1,6 +1,10 @@
 # Integrating e-zer0 with OpenClaw & NanoClaw
 
-e-zer0 uses the **Streamable HTTP** MCP transport (POST to `/mcp`). The legacy SSE transport (`GET /mcp/sse`) is not supported and will return 405. Make sure your client is configured for `type: http`, not `type: sse`.
+Before unattended use, follow the [agent operating guide](AGENT_OPERATING_GUIDE.md).
+
+e-zer0 uses the **Streamable HTTP** MCP transport (POST to `/mcp`). Standalone SSE GET requests to `/mcp` and the legacy `/mcp/sse` endpoint return 405. Make sure your client is configured for `type: http`, not `type: sse`.
+
+Use `GET /health` for a basic public liveness check (`{"status":"ok"}`), not `GET /mcp`. It does not verify provider connectivity or database readiness. Poll sparingly: health checks still consume Worker requests. A client receiving 405 for an SSE GET must not keep retrying that unsupported stream; normal MCP calls continue over POST.
 
 OpenClaw and NanoClaw do not automatically complete the OAuth client-credentials flow. The setup is:
 
@@ -40,9 +44,9 @@ The response will include:
 
 ```json
 {
-  "access_token": "<JWT_ACCESS_TOKEN>",
-  "token_type": "Bearer",
-  "expires_in": 2592000
+    "access_token": "<JWT_ACCESS_TOKEN>",
+    "token_type": "Bearer",
+    "expires_in": 2592000
 }
 ```
 
@@ -55,11 +59,11 @@ Copy the `access_token`. You will use it as the bearer token in the MCP configur
 
 ```yaml
 mcp_servers:
-  e-zer0:
-    type: http
-    url: "https://<YOUR_INSTANCE_NAME>.workers.dev/mcp"
-    headers:
-      Authorization: "Bearer <JWT_ACCESS_TOKEN>"
+    e-zer0:
+        type: http
+        url: 'https://<YOUR_INSTANCE_NAME>.workers.dev/mcp'
+        headers:
+            Authorization: 'Bearer <JWT_ACCESS_TOKEN>'
 ```
 
 3. Restart OpenClaw so it reloads the MCP configuration.
@@ -72,15 +76,15 @@ mcp_servers:
 
 ```json
 {
-  "mcpServers": {
-    "e-zer0": {
-      "type": "http",
-      "url": "https://<YOUR_INSTANCE_NAME>.workers.dev/mcp",
-      "headers": {
-        "Authorization": "Bearer <JWT_ACCESS_TOKEN>"
-      }
+    "mcpServers": {
+        "e-zer0": {
+            "type": "http",
+            "url": "https://<YOUR_INSTANCE_NAME>.workers.dev/mcp",
+            "headers": {
+                "Authorization": "Bearer <JWT_ACCESS_TOKEN>"
+            }
+        }
     }
-  }
 }
 ```
 
