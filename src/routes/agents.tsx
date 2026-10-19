@@ -138,6 +138,7 @@ async function renderAgents(c: Context<AgentEnv>) {
     const editId = c.req.query('edit');
     const clients =
         (await c.env.DB.prepare('SELECT * FROM mcp_clients ORDER BY created_at DESC').all<McpClient>()).results || [];
+    const editingClient = clients.find((client) => editId === String(client.id) && client.is_active);
     const accounts =
         (await c.env.DB.prepare('SELECT id, alias, email_address, status FROM email_accounts').all<PermissionAccount>())
             .results || [];
@@ -148,16 +149,17 @@ async function renderAgents(c: Context<AgentEnv>) {
                 email_account_id: number;
             }>()
         ).results || [];
-    const calendarGrants = editId
-        ? (
-              await c.env.DB.prepare(
-                  'SELECT email_account_id FROM mcp_client_calendar_accounts WHERE mcp_client_id = ?'
-              )
-                  .bind(editId)
-                  .all<{ email_account_id: number }>()
-          ).results || []
-        : [];
-    const editingClient = clients.find((client) => editId === String(client.id) && client.is_active);
+    const calendarGrantQuery = c.env.DB.prepare(
+        'SELECT mcp_client_id, email_account_id FROM mcp_client_calendar_accounts' +
+            (editingClient ? ' WHERE mcp_client_id = ?' : '')
+    );
+    const calendarGrants =
+        (
+            await (editingClient ? calendarGrantQuery.bind(editingClient.id) : calendarGrantQuery).all<{
+                mcp_client_id: number;
+                email_account_id: number;
+            }>()
+        ).results || [];
     const message = c.req.query('message');
     const error = c.req.query('error');
 
@@ -256,9 +258,13 @@ async function renderAgents(c: Context<AgentEnv>) {
                                             const emailIds = mappings
                                                 .filter((m) => m.mcp_client_id === client.id)
                                                 .map((m) => m.email_account_id);
-                                            const allowedAliases = accounts
-                                                .filter((account) => emailIds.includes(account.id))
-                                                .map((account) => account.alias || account.email_address);
+                                            const calendarIds = calendarGrants
+                                                .filter((grant) => grant.mcp_client_id === client.id)
+                                                .map((grant) => grant.email_account_id);
+                                            const permittedAccounts = accounts.filter(
+                                                (account) =>
+                                                    emailIds.includes(account.id) || calendarIds.includes(account.id)
+                                            );
                                             return (
                                                 <tr>
                                                     <td style="font-weight:500;">{client.name}</td>
@@ -278,14 +284,22 @@ async function renderAgents(c: Context<AgentEnv>) {
                                                         </span>
                                                     </td>
                                                     <td style="font-size:13px; color:var(--text-secondary);">
-                                                        {allowedAliases.length ? (
+                                                        {permittedAccounts.length ? (
                                                             <div style="display:flex; flex-wrap:wrap; gap:4px;">
-                                                                {allowedAliases.map((alias) => (
+                                                                {permittedAccounts.map((account) => (
                                                                     <span
                                                                         class="badge"
                                                                         style="background:var(--border); color:var(--text-primary);"
                                                                     >
-                                                                        {alias}
+                                                                        {account.alias || account.email_address}:{' '}
+                                                                        {[
+                                                                            ...(emailIds.includes(account.id)
+                                                                                ? ['Email']
+                                                                                : []),
+                                                                            ...(calendarIds.includes(account.id)
+                                                                                ? ['Calendar (read-only)']
+                                                                                : []),
+                                                                        ].join(', ')}
                                                                     </span>
                                                                 ))}
                                                             </div>

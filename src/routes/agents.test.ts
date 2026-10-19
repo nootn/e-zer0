@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import agents, { updateAgentNameAndAccounts } from './agents';
 
-function fixture() {
+function fixture(emailIds = [1], calendarIds = [2]) {
     const statements: { sql: string; values: unknown[] }[] = [];
     const batch = vi.fn(async () => []);
     const db = {
@@ -22,9 +22,11 @@ function fixture() {
                             ],
                         };
                     if (sql.includes('FROM mcp_client_calendar_accounts'))
-                        return { results: [{ email_account_id: 2 }] };
+                        return {
+                            results: calendarIds.map((id) => ({ mcp_client_id: 1, email_account_id: id })),
+                        };
                     if (sql.includes('FROM mcp_client_accounts'))
-                        return { results: [{ mcp_client_id: 1, email_account_id: 1 }] };
+                        return { results: emailIds.map((id) => ({ mcp_client_id: 1, email_account_id: id })) };
                     return {
                         results: [
                             { id: 1, email_address: 'one@example.com', alias: 'one@example.com', status: 'active' },
@@ -67,6 +69,36 @@ it('uses the same account table with no grants preselected when creating', async
     for (const checkbox of html.match(/<input[^>]*type="checkbox"[^>]*>/g) || [])
         expect(checkbox).not.toContain('checked');
 });
+
+it.each([
+    { emailIds: [1], calendarIds: [], expected: ['one@example.com: Email'] },
+    { emailIds: [], calendarIds: [2], expected: ['Work: Calendar (read-only)'] },
+    {
+        emailIds: [1],
+        calendarIds: [1, 2],
+        expected: ['one@example.com: Email, Calendar (read-only)', 'Work: Calendar (read-only)'],
+    },
+    { emailIds: [], calendarIds: [], expected: [] },
+])(
+    'summarises each permitted account once with its capabilities ($emailIds / $calendarIds)',
+    async ({ emailIds, calendarIds, expected }) => {
+        const { db } = fixture(emailIds, calendarIds);
+        const response = await agents.request('/', {}, { DB: db });
+        expect(response.status).toBe(200);
+        const html = await response.text();
+        const summary = html.slice(html.indexOf('<th>Permitted Accounts</th>')).match(/<td[^>]*>[\s\S]*?<\/td>/g)?.[3];
+        expect(summary).toBeDefined();
+        if (expected.length) {
+            expect(summary).not.toContain('<em>None</em>');
+            expect(summary?.match(/class="badge"/g)).toHaveLength(expected.length);
+            for (const label of expected) expect(summary).toContain(`>${label}</span>`);
+        } else expect(summary).toContain('<em>None</em>');
+        expect(summary?.match(/one@example\.com/g) || []).toHaveLength(
+            emailIds.includes(1) || calendarIds.includes(1) ? 1 : 0
+        );
+        expect(summary).not.toContain('two@example.com');
+    }
+);
 
 it('saves name and both grant sets in one batch, deduplicates, and allows empty grants', async () => {
     const { db, batch } = fixture();

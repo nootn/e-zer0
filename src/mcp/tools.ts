@@ -1,7 +1,6 @@
 // MCP Tool implementations for e-zer0
 import type { Env, EmailAccount, DraftReplyResult, EmailRuleActions, EmailRuleConditions } from '../types';
 import {
-    gmailRuleQuery,
     gmailLabelActions,
     previewGmailRule,
     applyGmailPreview,

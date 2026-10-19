@@ -57,11 +57,12 @@ jobs:
                   GITHUB_REPOSITORY: ${{ github.repository }}
               run: |
                   set -euo pipefail
-                  visibility="$(curl -fsSL \
+                  curl -fsSL \
                     -H "Authorization: Bearer ${GITHUB_TOKEN}" \
                     -H "Accept: application/vnd.github+json" \
                     "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}" \
-                    | python3 -c "import json,sys; print(json.load(sys.stdin)['visibility'])")"
+                    -o "${RUNNER_TEMP}/repository.json"
+                  visibility="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['visibility'])" "${RUNNER_TEMP}/repository.json")"
 
                   if [ "${visibility}" = "public" ]; then
                     echo "run_codeql=true" >> "${GITHUB_OUTPUT}"

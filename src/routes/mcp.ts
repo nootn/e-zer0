@@ -37,8 +37,6 @@ mcp.use('*', async (c, next) => {
         () => trace('incoming_request_aborted', { source: 'request_signal_not_proof_of_user_action' }),
         { once: true }
     );
-    c.header('X-Ezer0-Catalog-Version', '1.1.1');
-    c.header('X-Ezer0-Request-Id', requestId);
     try {
         await next();
     } catch (error) {
@@ -46,32 +44,40 @@ mcp.use('*', async (c, next) => {
         throw error;
     }
     const status = c.res.status;
+    const headers = new Headers(c.res.headers);
+    headers.set('X-Ezer0-Catalog-Version', '1.1.1');
+    headers.set('X-Ezer0-Request-Id', requestId);
     trace('mcp_response_started', { status });
     if (!c.res.body) {
+        c.res = new Response(null, { status, statusText: c.res.statusText, headers });
         trace('mcp_response_completed', { status });
         return;
     }
     const reader = c.res.body.getReader();
+    let cancelled = false;
     c.res = new Response(
         new ReadableStream({
             async pull(controller) {
                 try {
                     const result = await reader.read();
+                    if (cancelled) return;
                     if (result.done) {
                         trace('mcp_response_completed', { status });
                         controller.close();
                     } else controller.enqueue(result.value);
                 } catch (error) {
+                    if (cancelled) return;
                     trace('mcp_response_stream_failed', { error_name: error instanceof Error ? error.name : 'Error' });
                     controller.error(error);
                 }
             },
             async cancel(reason) {
+                cancelled = true;
                 trace('mcp_response_stream_cancelled', { source: 'peer_stream_not_proof_of_user_action' });
                 await reader.cancel(reason);
             },
         }),
-        { status, statusText: c.res.statusText, headers: c.res.headers }
+        { status, statusText: c.res.statusText, headers }
     );
 });
 

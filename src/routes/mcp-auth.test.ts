@@ -360,6 +360,47 @@ class FakePreparedStatement {
 
 const VALID_SESSION_COOKIE = 'ezer0_session=valid-session';
 
+it('retains correlation headers on a successful SDK initialise response', async () => {
+    const env = await createEnv([
+        {
+            id: 1,
+            name: 'Test',
+            client_id: 'client',
+            secret_hash: '',
+            salt: '',
+            is_active: 1,
+            last_used_at: null,
+            created_at: '2026-10-07',
+        },
+    ]);
+    const token = await signTestJwt({ sub: 'client', exp: Math.floor(Date.now() / 1000) + 60 }, env.JWT_SECRET);
+    const response = await app.fetch(
+        new Request('https://example.com/mcp', {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                Accept: 'application/json, text/event-stream',
+            },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: 1,
+                method: 'initialize',
+                params: {
+                    protocolVersion: '2025-03-26',
+                    capabilities: {},
+                    clientInfo: { name: 'Test', version: '1' },
+                },
+            }),
+        }),
+        env
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('X-Ezer0-Catalog-Version')).toBe('1.1.1');
+    expect(response.headers.get('X-Ezer0-Request-Id')).toBeTruthy();
+    await response.text();
+});
+
 it('traces peer MCP cancellation without leaking its reason or attributing it to a human', async () => {
     const logs: string[] = [];
     const spy = vi.spyOn(console, 'log').mockImplementation((value) => logs.push(String(value)));
