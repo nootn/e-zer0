@@ -1,5 +1,7 @@
 # Integrating e-zer0 with OpenClaw & NanoClaw
 
+Before unattended use, follow the [agent operating guide](AGENT_OPERATING_GUIDE.md).
+
 e-zer0 uses the **Streamable HTTP** MCP transport (POST to `/mcp`). Standalone SSE GET requests to `/mcp` and the legacy `/mcp/sse` endpoint return 405. Make sure your client is configured for `type: http`, not `type: sse`.
 
 Use `GET /health` for a basic public liveness check (`{"status":"ok"}`), not `GET /mcp`. It does not verify provider connectivity or database readiness. Poll sparingly: health checks still consume Worker requests. A client receiving 405 for an SSE GET must not keep retrying that unsupported stream; normal MCP calls continue over POST.

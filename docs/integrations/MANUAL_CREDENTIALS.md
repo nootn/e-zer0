@@ -1,5 +1,7 @@
 # Manual MCP Credentials Fallback
 
+Before unattended use, follow the [agent operating guide](AGENT_OPERATING_GUIDE.md).
+
 Use this flow for MCP clients that do not support automatic OAuth registration, OAuth discovery, or browser-based authorization.
 
 ## When To Use This
@@ -49,9 +51,9 @@ The response will include:
 
 ```json
 {
-  "access_token": "<JWT_ACCESS_TOKEN>",
-  "token_type": "Bearer",
-  "expires_in": 2592000
+    "access_token": "<JWT_ACCESS_TOKEN>",
+    "token_type": "Bearer",
+    "expires_in": 2592000
 }
 ```
 

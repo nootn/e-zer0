@@ -1,20 +1,22 @@
 # Integrating e-zer0 with Claude
 
+Before unattended use, follow the [agent operating guide](AGENT_OPERATING_GUIDE.md).
+
 e-zer0 exposes a remote MCP server over Streamable HTTP and supports OAuth dynamic client registration, so compatible Claude clients can connect without pre-generating static credentials.
 
 ## Recommended Setup
 
 1. Open Claude and add a custom MCP connector/server using your deployed MCP endpoint:
 
-   `https://<YOUR_INSTANCE_NAME>.workers.dev/mcp`
+    `https://<YOUR_INSTANCE_NAME>.workers.dev/mcp`
 
 2. Let Claude start the OAuth flow.
 
 3. When e-zer0 opens the authorization page:
 
-   - review or change the `Agent Name`
-   - choose the `Permitted Email Accounts`
-   - optionally leave all accounts unselected if you only want to complete sign-in for now
+    - review or change the `Agent Name`
+    - choose the `Permitted Email Accounts`
+    - optionally leave all accounts unselected if you only want to complete sign-in for now
 
 4. Finish the OAuth approval flow.
 

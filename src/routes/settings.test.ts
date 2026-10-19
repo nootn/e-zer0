@@ -32,6 +32,7 @@ it('renders provider instructions matching requested scopes and separate calenda
     expect(html).toContain('saved as drafts only');
     expect(html).toContain('Create custom MCP server');
     expect(html).toContain('https://example.com/mcp');
+    expect(html).toContain('https://example.com/health');
     expect(html).toContain('Refresh tools');
     expect(html).toContain('View details');
     expect(html).toContain('plugin&#39;s Permission control');
