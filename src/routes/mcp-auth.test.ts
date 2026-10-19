@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import app from '../app';
 import { generateSalt, hashPassword } from '../lib/crypto';
 import { updateAgentNameAndAccounts } from './agents';
@@ -350,11 +350,61 @@ class FakePreparedStatement {
             } as T;
         }
 
+        if (this.sql === 'SELECT id FROM email_accounts') {
+            return { results: this.db.emailAccounts.map((row) => ({ id: row.id })) } as T;
+        }
+
         throw new Error(`Unhandled all() SQL in test fake: ${this.sql}`);
     }
 }
 
 const VALID_SESSION_COOKIE = 'ezer0_session=valid-session';
+
+it('traces peer MCP cancellation without leaking its reason or attributing it to a human', async () => {
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((value) => logs.push(String(value)));
+    try {
+        const env = await createEnv([
+            {
+                id: 1,
+                name: 'Test',
+                client_id: 'client',
+                secret_hash: '',
+                salt: '',
+                is_active: 1,
+                last_used_at: null,
+                created_at: '2026-10-07',
+            },
+        ]);
+        const token = await signTestJwt({ sub: 'client', exp: Math.floor(Date.now() / 1000) + 60 }, env.JWT_SECRET);
+        const response = await app.fetch(
+            new Request('https://example.com/mcp', {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json, text/event-stream',
+                    'MCP-Protocol-Version': '2025-03-26',
+                },
+                body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    method: 'notifications/cancelled',
+                    params: { requestId: 0, reason: 'private cancel reason' },
+                }),
+            }),
+            env
+        );
+        expect(response.status).toBe(202);
+        await response.text();
+        const entry = logs.map((log) => JSON.parse(log)).find((log) => log.mcp_method === 'notifications/cancelled');
+        expect(entry.cancelled_request_id).toBe(0);
+        expect(entry.cancellation_source).toBe('peer_mcp_notification_not_proof_of_user_action');
+        expect(logs.join(' ')).not.toContain('private cancel reason');
+        expect(logs.join(' ')).not.toContain(token);
+    } finally {
+        spy.mockRestore();
+    }
+});
 
 async function signTestJwt(payload: Record<string, unknown>, secret: string) {
     const encoder = new TextEncoder();

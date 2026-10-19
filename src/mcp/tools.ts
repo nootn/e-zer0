@@ -1,5 +1,12 @@
 // MCP Tool implementations for e-zer0
-import type { Env, EmailAccount } from '../types';
+import type { Env, EmailAccount, DraftReplyResult, EmailRuleActions, EmailRuleConditions } from '../types';
+import {
+    gmailRuleQuery,
+    gmailLabelActions,
+    previewGmailRule,
+    applyGmailPreview,
+    createGmailFilterSafely,
+} from '../lib/email/label-rules';
 import { decrypt, encrypt } from '../lib/crypto';
 import {
     listGmailMessages,
@@ -8,6 +15,7 @@ import {
     deleteGmailMessage,
     listGmailLabels,
     moveGmailToFolder,
+    draftGmailReply,
 } from '../lib/email/gmail';
 import {
     listOutlookMessages,
@@ -16,6 +24,7 @@ import {
     markOutlookMessageRead,
     listOutlookFolders,
     moveOutlookToFolder,
+    draftOutlookReply,
     listOutlookRules,
     createOutlookRule,
     updateOutlookRule,
@@ -23,6 +32,7 @@ import {
 } from '../lib/email/outlook';
 import { indexEmailsBatch, searchSimilar, deleteFromIndex } from '../lib/vector';
 import { sanitizeEmailContent } from '../lib/sanitizer';
+import { listProviderCalendars, getProviderCalendarEvents } from '../lib/calendar';
 import {
     listGoogleTaskLists,
     listGoogleTasks,
@@ -100,15 +110,16 @@ async function getAccountToken(
     db: D1Database,
     accountId: number,
     encryptionKey: string,
-    clientId: string
+    clientId: string,
+    access: 'mail' | 'calendar' = 'mail'
 ): Promise<{ account: EmailAccount; accessToken: string }> {
     // Authorize MCP client to access this account
     const permitted = await db
         .prepare(
             `
-        SELECT 1 FROM mcp_client_accounts mca
+        SELECT 1 FROM ${access === 'calendar' ? 'mcp_client_calendar_accounts' : 'mcp_client_accounts'} mca
         JOIN mcp_clients mc ON mc.id = mca.mcp_client_id
-        WHERE mc.client_id = ? AND mca.email_account_id = ?
+        WHERE mc.client_id = ? AND mc.is_active = 1 AND mca.email_account_id = ?
     `
         )
         .bind(clientId, accountId)
@@ -174,6 +185,82 @@ export async function listConnectedAccounts(env: Env, clientId: string): Promise
 
 // ── Tool: read_recent_emails ────────────────────────────
 
+export async function listCalendarAccounts(env: Env, clientId: string) {
+    const result = await env.DB.prepare(
+        `SELECT ea.id, ea.alias, ea.email_address, ea.provider, ea.status
+        FROM email_accounts ea JOIN mcp_client_calendar_accounts ca ON ca.email_account_id = ea.id
+        JOIN mcp_clients mc ON mc.id = ca.mcp_client_id WHERE mc.client_id = ? AND mc.is_active = 1`
+    )
+        .bind(clientId)
+        .all();
+    return { accounts: result.results || [] };
+}
+
+export async function listCalendars(env: Env, clientId: string, accountId: number, pageToken?: string) {
+    const { account, accessToken } = await getAccountToken(
+        env.DB,
+        accountId,
+        env.ENCRYPTION_KEY!,
+        clientId,
+        'calendar'
+    );
+    const result = await listProviderCalendars(account.provider, accessToken, pageToken);
+    return {
+        ...result,
+        calendars: result.calendars.map((calendar) => {
+            const clean = sanitizeEmailContent(calendar.name);
+            return {
+                ...calendar,
+                name: clean.sanitizedText,
+                _security: { risk_score: clean.riskScore, injection_warnings: clean.injectionWarnings },
+            };
+        }),
+    };
+}
+
+export async function getCalendarEvents(
+    env: Env,
+    clientId: string,
+    accountId: number,
+    calendarId: string,
+    start: string,
+    end: string,
+    count: number,
+    pageToken?: string
+) {
+    const { account, accessToken } = await getAccountToken(
+        env.DB,
+        accountId,
+        env.ENCRYPTION_KEY!,
+        clientId,
+        'calendar'
+    );
+    const result = await getProviderCalendarEvents(
+        account.provider,
+        accessToken,
+        calendarId,
+        start,
+        end,
+        count,
+        pageToken
+    );
+    return {
+        ...result,
+        events: result.events.map((event) => {
+            const clean = sanitizeMessages([
+                { subject: event.title, snippet: event.location, body: event.description },
+            ])[0];
+            return {
+                ...event,
+                title: clean.subject,
+                description: clean.body,
+                location: clean.snippet,
+                _security: clean._security,
+            };
+        }),
+    };
+}
+
 export async function readRecentEmails(
     env: Env,
     clientId: string,
@@ -222,6 +309,7 @@ export interface GetEmailsOptions {
     after?: string;
     before?: string;
     count: number;
+    page_token?: string;
 }
 
 export async function getEmails(
@@ -232,14 +320,35 @@ export async function getEmails(
 ): Promise<any> {
     const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
 
-    let messages;
-    if (account.provider === 'google') {
-        const { searchGmailMessages } = await import('../lib/email/gmail');
-        messages = await searchGmailMessages(accessToken, options);
-    } else {
-        const { searchOutlookMessages } = await import('../lib/email/outlook');
-        messages = await searchOutlookMessages(accessToken, options);
+    const { page_token, ...criteria } = options;
+    criteria.count = Math.max(1, Math.min(50, Math.floor(criteria.count)));
+    if (!Number.isFinite(criteria.count)) throw new Error('Invalid email count');
+    const query = JSON.stringify(
+        Object.entries(criteria)
+            .filter(([, value]) => value !== undefined)
+            .sort(([a], [b]) => a.localeCompare(b))
+    );
+    let continuation: string | undefined;
+    if (page_token) {
+        const saved = JSON.parse(await decrypt(page_token, env.ENCRYPTION_KEY!));
+        if (
+            saved.clientId !== clientId ||
+            saved.accountId !== accountId ||
+            saved.query !== query ||
+            saved.expires < Date.now()
+        )
+            throw new Error('Invalid or expired email page token; repeat the original query');
+        continuation = saved.continuation;
     }
+    let page;
+    if (account.provider === 'google') {
+        const { searchGmailMessagePage } = await import('../lib/email/gmail');
+        page = await searchGmailMessagePage(accessToken, criteria, continuation);
+    } else {
+        const { searchOutlookMessagePage } = await import('../lib/email/outlook');
+        page = await searchOutlookMessagePage(accessToken, criteria, continuation);
+    }
+    const messages = page.messages;
 
     // Index emails for semantic search (best-effort, batched to minimise subrequests)
     try {
@@ -260,7 +369,25 @@ export async function getEmails(
     // Sanitize email content before returning (PII redaction + prompt injection detection)
     const sanitizedMessages = sanitizeMessages(messages);
 
-    return { account_id: accountId, provider: account.provider, messages: sanitizedMessages };
+    const nextPageToken = page.next_page_token
+        ? await encrypt(
+              JSON.stringify({
+                  clientId,
+                  accountId,
+                  query,
+                  continuation: page.next_page_token,
+                  expires: Date.now() + 30 * 60_000,
+              }),
+              env.ENCRYPTION_KEY!
+          )
+        : undefined;
+    return {
+        account_id: accountId,
+        provider: account.provider,
+        messages: sanitizedMessages,
+        next_page_token: nextPageToken,
+        exhausted: page.exhausted,
+    };
 }
 
 // ── Tool: manage_email ──────────────────────────────────
@@ -391,18 +518,34 @@ export async function organizeEmail(
     clientId: string,
     accountId: number,
     messageId: string,
-    folder: string
+    folder: string,
+    sourceLabel?: string
 ): Promise<any> {
     const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
 
     let result;
     if (account.provider === 'google') {
-        result = await moveGmailToFolder(accessToken, messageId, folder);
+        result = await moveGmailToFolder(accessToken, messageId, folder, sourceLabel);
     } else {
         result = await moveOutlookToFolder(accessToken, messageId, folder);
     }
 
     return { success: true, account_id: accountId, message_id: messageId, ...result };
+}
+
+export async function draftEmailReply(
+    env: Env,
+    clientId: string,
+    accountId: number,
+    messageId: string,
+    body: string
+): Promise<DraftReplyResult & { success: true; account_id: number }> {
+    const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
+    const draft =
+        account.provider === 'google'
+            ? await draftGmailReply(accessToken, messageId, body, account.email_address)
+            : await draftOutlookReply(accessToken, messageId, body);
+    return { success: true, account_id: accountId, ...draft };
 }
 
 // ── Tool: list_folders (unified folders/labels) ────────
@@ -449,26 +592,185 @@ export async function listEmailRules(env: Env, clientId: string, accountId: numb
     }
 }
 
+function validateRuleCapabilities(
+    provider: string,
+    conditions: EmailRuleConditions,
+    actions: EmailRuleActions,
+    applyToExisting: boolean
+) {
+    const extended =
+        conditions.query !== undefined ||
+        conditions.negatedQuery !== undefined ||
+        actions.addLabels !== undefined ||
+        actions.removeLabels !== undefined ||
+        actions.archive !== undefined;
+    if (provider !== 'google' && extended)
+        throw new Error(
+            'Gmail query/negatedQuery and independent label/archive rule actions are not supported for Outlook. Use existing Outlook conditions and moveToFolder.'
+        );
+    if (extended && applyToExisting)
+        throw new Error(
+            'Extended Gmail rules require preview_email_rule and apply_email_rule_preview for existing mail; applyToExisting is supported only for legacy rules.'
+        );
+}
+
+export async function getEmail(env: Env, clientId: string, accountId: number, messageId: string) {
+    const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
+    const message =
+        account.provider === 'google'
+            ? await getGmailMessage(accessToken, messageId)
+            : await getOutlookMessage(accessToken, messageId);
+    return {
+        account_id: accountId,
+        provider: account.provider,
+        message: sanitizeMessages([message])[0],
+        read_only: true,
+    };
+}
+
+export async function searchEmailPage(
+    env: Env,
+    clientId: string,
+    accountId: number,
+    query: string | undefined,
+    count: number,
+    pageToken?: string
+) {
+    const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
+    if (account.provider === 'google') {
+        const { listGmailMessagePage } = await import('../lib/email/gmail');
+        return {
+            account_id: accountId,
+            provider: account.provider,
+            ...(await listGmailMessagePage(accessToken, query || 'in:inbox', count, pageToken)),
+        };
+    }
+    if (query)
+        throw new Error(
+            'Gmail native search queries are not supported for Outlook; this paged endpoint lists the Outlook inbox'
+        );
+    const { listOutlookMessagePage } = await import('../lib/email/outlook');
+    return {
+        account_id: accountId,
+        provider: account.provider,
+        ...(await listOutlookMessagePage(accessToken, count, pageToken)),
+    };
+}
+
+export async function manageEmailLabels(
+    env: Env,
+    clientId: string,
+    accountId: number,
+    operation: 'list' | 'create' | 'change',
+    args: { name?: string; message_id?: string; actions?: EmailRuleActions }
+) {
+    const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
+    if (account.provider !== 'google')
+        throw new Error(
+            'Independent label management is Gmail-only; Outlook folders are not labels. Use list_folders/organize_email for Outlook.'
+        );
+    if (operation === 'list') return { account_id: accountId, labels: await listGmailLabels(accessToken) };
+    if (operation === 'create') {
+        const { createGmailLabel } = await import('../lib/email/gmail');
+        return { account_id: accountId, label: await createGmailLabel(accessToken, args.name!) };
+    }
+    const actions = args.actions!;
+    const resolved = await gmailLabelActions(accessToken, actions);
+    const current = await getGmailMessage(accessToken, args.message_id!);
+    const desired = [
+        ...new Set([...current.labels.filter((l) => !resolved.removeLabelIds.includes(l)), ...resolved.addLabelIds]),
+    ];
+    const already =
+        resolved.addLabelIds.every((l) => current.labels.includes(l)) &&
+        resolved.removeLabelIds.every((l) => !current.labels.includes(l));
+    if (already)
+        return {
+            account_id: accountId,
+            message_id: args.message_id,
+            status: 'already_applied',
+            labels: current.labels,
+        };
+    try {
+        await modifyGmailMessage(accessToken, args.message_id!, resolved.addLabelIds, resolved.removeLabelIds);
+    } catch {
+        const after = await getGmailMessage(accessToken, args.message_id!);
+        if (JSON.stringify([...after.labels].sort()) !== JSON.stringify(desired.sort()))
+            throw new Error('Label write outcome uncertain; read message state before retrying');
+        return { account_id: accountId, message_id: args.message_id, status: 'reconciled', labels: after.labels };
+    }
+    return { account_id: accountId, message_id: args.message_id, status: 'applied', labels: desired };
+}
+
+export async function previewEmailRule(
+    env: Env,
+    clientId: string,
+    accountId: number,
+    conditions: EmailRuleConditions,
+    actions: EmailRuleActions,
+    protectTerms: string[],
+    count: number,
+    pageToken?: string
+) {
+    const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
+    if (account.provider !== 'google')
+        throw new Error('Rule preview/application is currently Gmail-only; existing Outlook rule tools are unchanged');
+    return {
+        account_id: accountId,
+        ...(await previewGmailRule(
+            accessToken,
+            env.ENCRYPTION_KEY!,
+            clientId,
+            accountId,
+            conditions,
+            actions,
+            protectTerms,
+            count,
+            pageToken
+        )),
+    };
+}
+
+export async function applyEmailRulePreview(
+    env: Env,
+    clientId: string,
+    accountId: number,
+    previewToken: string,
+    ids: string[]
+) {
+    const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
+    if (account.provider !== 'google') throw new Error('Rule preview/application is Gmail-only');
+    return {
+        account_id: accountId,
+        ...(await applyGmailPreview(accessToken, env.ENCRYPTION_KEY!, clientId, accountId, previewToken, ids)),
+    };
+}
+
 // ── Tool: create_email_rule ─────────────────────────────
 export async function createEmailRule(
     env: Env,
     clientId: string,
     accountId: number,
     name: string,
-    conditions: any,
-    actions: any,
+    conditions: EmailRuleConditions,
+    actions: EmailRuleActions,
     applyToExisting: boolean = false
 ): Promise<any> {
     const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
+    validateRuleCapabilities(account.provider, conditions, actions, applyToExisting);
 
     if (account.provider === 'google') {
-        const { createGmailFilter, resolveGmailLabelId } = await import('../lib/email/gmail');
+        const { resolveGmailLabelId, buildGmailSearchClause } = await import('../lib/email/gmail');
         // Map unified conditions/actions to Gmail format
         const criteria: any = {};
         if (conditions.from) criteria.from = conditions.from.join(' OR ');
         if (conditions.to) criteria.to = conditions.to.join(' OR ');
         if (conditions.subject) criteria.subject = conditions.subject.join(' OR ');
         if (conditions.body) criteria.query = conditions.body.join(' OR ');
+        if (conditions.query)
+            criteria.query = [buildGmailSearchClause(undefined, conditions.body), `(${conditions.query})`]
+                .filter(Boolean)
+                .join(' ');
+        if (conditions.negatedQuery) criteria.negatedQuery = conditions.negatedQuery;
 
         const actionObj: any = {};
         if (actions.markAsRead) actionObj.removeLabelIds = ['UNREAD'];
@@ -477,8 +779,21 @@ export async function createEmailRule(
             actionObj.removeLabelIds = [...(actionObj.removeLabelIds || []), 'INBOX'];
         }
         if (actions.delete) actionObj.addLabelIds = [...(actionObj.addLabelIds || []), 'TRASH'];
+        if (actions.addLabels?.length || actions.removeLabels?.length || actions.archive) {
+            const independent = await gmailLabelActions(accessToken, {
+                addLabels: actions.addLabels,
+                removeLabels: actions.removeLabels,
+                archive: actions.archive,
+            });
+            actionObj.addLabelIds = [...new Set([...(actionObj.addLabelIds || []), ...independent.addLabelIds])];
+            actionObj.removeLabelIds = [
+                ...new Set([...(actionObj.removeLabelIds || []), ...independent.removeLabelIds]),
+            ];
+        }
+        if ((actionObj.addLabelIds || []).some((id: string) => actionObj.removeLabelIds?.includes(id)))
+            throw new Error('Cannot add and remove the same label');
 
-        const filter = await createGmailFilter(accessToken, criteria, actionObj);
+        const filter = await createGmailFilterSafely(env.DB, accountId, accessToken, criteria, actionObj);
 
         if (applyToExisting) {
             const { applyRuleToExistingGmail } = await import('../lib/email/gmail');
@@ -526,17 +841,25 @@ export async function updateEmailRule(
     accountId: number,
     ruleId: string,
     name: string,
-    conditions: any,
-    actions: any,
+    conditions: EmailRuleConditions,
+    actions: EmailRuleActions,
     applyToExisting: boolean = false
 ): Promise<any> {
     const { account, accessToken } = await getAccountToken(env.DB, accountId, env.ENCRYPTION_KEY!, clientId);
+    validateRuleCapabilities(account.provider, conditions, actions, applyToExisting);
 
     if (account.provider === 'google') {
         const { deleteGmailFilter } = await import('../lib/email/gmail');
-        // Gmail doesn't support PATCH, must delete and recreate
-        await deleteGmailFilter(accessToken, ruleId);
-        return await createEmailRule(env, clientId, accountId, name, conditions, actions, applyToExisting);
+        // Create/reconcile the replacement before removing the old filter.
+        const replacement = await createEmailRule(env, clientId, accountId, name, conditions, actions, false);
+        if (replacement.rule.id !== ruleId) {
+            await deleteGmailFilter(accessToken, ruleId);
+            await env.DB.prepare('DELETE FROM filter_write_intents WHERE account_id = ? AND provider_id = ?')
+                .bind(accountId, ruleId)
+                .run();
+        }
+        if (applyToExisting) await createEmailRule(env, clientId, accountId, name, conditions, actions, true);
+        return replacement;
     } else {
         const { resolveOutlookFolderId } = await import('../lib/email/outlook');
 
@@ -571,6 +894,9 @@ export async function deleteEmailRule(env: Env, clientId: string, accountId: num
     if (account.provider === 'google') {
         const { deleteGmailFilter } = await import('../lib/email/gmail');
         await deleteGmailFilter(accessToken, ruleId);
+        await env.DB.prepare('DELETE FROM filter_write_intents WHERE account_id = ? AND provider_id = ?')
+            .bind(accountId, ruleId)
+            .run();
     } else {
         await deleteOutlookRule(accessToken, ruleId);
     }

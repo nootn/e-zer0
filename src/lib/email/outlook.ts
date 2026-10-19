@@ -1,4 +1,7 @@
 // Microsoft Graph Mail API client
+import type { DraftReplyResult } from '../../types';
+import { assertEmailRequestAllowed } from './safety';
+import { providerRequest } from '../provider-request';
 
 const GRAPH_API_BASE = 'https://graph.microsoft.com/v1.0/me';
 
@@ -11,10 +14,12 @@ export interface EmailMessage {
     snippet: string;
     body?: string;
     isRead: boolean;
+    inferenceClassification?: 'focused' | 'other';
 }
 
 async function graphFetch(accessToken: string, path: string, options?: RequestInit): Promise<any> {
-    const res = await fetch(`${GRAPH_API_BASE}${path}`, {
+    assertEmailRequestAllowed(`${GRAPH_API_BASE}${path}`);
+    const res = await providerRequest('microsoft_mail', `${GRAPH_API_BASE}${path}`, {
         ...options,
         headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -24,11 +29,13 @@ async function graphFetch(accessToken: string, path: string, options?: RequestIn
     });
 
     if (!res.ok) {
+        if (path.endsWith('/createReply')) throw new Error(`Graph API error (${res.status}): draft creation failed`);
         const err = await res.text();
         throw new Error(`Graph API error (${res.status}): ${err}`);
     }
 
-    return res.json();
+    const body = await res.text();
+    return body.trim() ? JSON.parse(body) : undefined;
 }
 
 // Helper to encode Graph API IDs. Hotmail/Outlook IDs can end in '==' padding.
@@ -39,37 +46,51 @@ function encodeGraphId(id: string): string {
     return encodeURIComponent(id.trim()).replace(/%3D/gi, '=');
 }
 
+function outlookContinuation(initial: URL, pageToken?: string): URL {
+    const request = pageToken ? new URL(pageToken) : initial;
+    // Graph nextLink uses OData key syntax and capitalised well-known folder aliases.
+    const collection = (path: string) =>
+        path
+            .replace(/\/mailFolders\('([^']+)'\)/g, '/mailFolders/$1')
+            .replace(
+                /\/mailFolders\/(inbox|archive|junkemail|deleteditems|drafts|sentitems)(?=\/)/gi,
+                (_, alias: string) => `/mailFolders/${alias.toLowerCase()}`
+            );
+    if (
+        request.origin !== initial.origin ||
+        collection(request.pathname) !== collection(initial.pathname) ||
+        request.username ||
+        request.password ||
+        request.hash
+    )
+        throw new Error('Invalid Outlook page token');
+    return request;
+}
+
+import type { GetEmailsOptions } from '../../mcp/tools';
+
 export async function listOutlookMessages(
     accessToken: string,
     maxResults = 10,
     unreadOnly = false
 ): Promise<EmailMessage[]> {
-    const filter = unreadOnly ? '&$filter=isRead eq false' : '';
-    const data = await graphFetch(
-        accessToken,
-        `/mailFolders/Inbox/messages?$top=${maxResults}${filter}&$select=id,subject,from,toRecipients,receivedDateTime,bodyPreview,isRead&$orderby=receivedDateTime desc`
-    );
-
-    return (data.value || []).map((msg: any) => ({
-        id: msg.id,
-        subject: msg.subject || '',
-        from: msg.from?.emailAddress?.address || '',
-        to: (msg.toRecipients || []).map((r: any) => r.emailAddress?.address).join(', '),
-        date: msg.receivedDateTime || '',
-        snippet: msg.bodyPreview || '',
-        isRead: msg.isRead,
-    }));
+    return searchOutlookMessages(accessToken, { count: maxResults, is_read: unreadOnly ? false : undefined });
 }
 
-import type { GetEmailsOptions } from '../../mcp/tools';
-
 export async function searchOutlookMessages(accessToken: string, options: GetEmailsOptions): Promise<EmailMessage[]> {
-    let folder = (options.folder || 'inbox').toLowerCase();
+    return (await searchOutlookMessagePage(accessToken, options)).messages;
+}
 
-    // Graph API well-known folder names
-    const FOLDER_MAP: Record<string, string> = {
-        archive: 'archive',
+export async function searchOutlookMessagePage(
+    accessToken: string,
+    options: GetEmailsOptions,
+    pageToken?: string
+): Promise<{ messages: EmailMessage[]; next_page_token?: string; exhausted: boolean }> {
+    const folder = (options.folder || 'inbox').toLowerCase();
+    const classification = ['other', 'focused'].includes(folder) ? folder : undefined;
+    const folders: Record<string, string> = {
         inbox: 'inbox',
+        archive: 'archive',
         spam: 'junkemail',
         junk: 'junkemail',
         trash: 'deleteditems',
@@ -77,92 +98,73 @@ export async function searchOutlookMessages(accessToken: string, options: GetEma
         drafts: 'drafts',
         sent: 'sentitems',
     };
-
-    let apiPath = `/mailFolders/inbox/messages`;
-    let inferenceFilter = '';
-
-    // Handle "other" or "focused" inbox pseudo-folders
-    if (folder === 'other' || folder === 'focused') {
-        const classification = folder === 'other' ? 'other' : 'focused';
-        inferenceFilter = `inferenceClassification eq '${classification}'`;
-        // Keep path as inbox because Focused/Other is just a view on the Inbox
-    } else if (FOLDER_MAP[folder]) {
-        apiPath = `/mailFolders/${FOLDER_MAP[folder]}/messages`;
-    } else if (folder !== 'inbox' && folder !== 'all' && folder !== 'any') {
-        // Assume custom folder
-        const folders = await listOutlookFolders(accessToken);
-        const customFolder = folders.find((f) => f.name.toLowerCase() === folder);
-        if (customFolder) {
-            apiPath = `/mailFolders/${customFolder.id}/messages`;
-        }
+    let apiPath = '/mailFolders/inbox/messages';
+    if (folder === 'all' || folder === 'any') apiPath = '/messages';
+    else if (folders[folder]) apiPath = `/mailFolders/${folders[folder]}/messages`;
+    else if (!classification) {
+        const found = (await listOutlookFolders(accessToken)).find(
+            (f) => f.name.toLowerCase() === folder || f.id === options.folder
+        );
+        if (!found) throw new Error('Outlook folder not found');
+        apiPath = `/mailFolders/${encodeGraphId(found.id)}/messages`;
     }
-
-    // Strip double-quotes from user input — they conflict with Graph API's OData $search="..." outer
-    // string delimiters and cause KQL syntax errors (e.g. subject:"Sydney Angels" inside $search="..."
-    // makes the parser see an unterminated string).
-    const sanitizeKql = (s: string) => s.replace(/"/g, '');
-
-    const searchParts: string[] = [];
-    if (options.is_read !== undefined) {
-        searchParts.push(`isread:${options.is_read}`);
-    }
-    if (options.from) {
-        searchParts.push(`from:${sanitizeKql(options.from)}`);
-    }
-    if (options.subject) {
-        searchParts.push(`subject:${sanitizeKql(options.subject)}`);
-    }
-    if (options.after) {
-        let afterVal = options.after;
-        if (afterVal.includes('T')) {
-            const ts = new Date(afterVal);
-            if (!isNaN(ts.getTime())) afterVal = ts.toISOString();
-        }
-        searchParts.push(`received>=${afterVal}`);
-    }
-    if (options.before) {
-        let beforeVal = options.before;
-        if (beforeVal.includes('T')) {
-            const ts = new Date(beforeVal);
-            if (!isNaN(ts.getTime())) beforeVal = ts.toISOString();
-        }
-        searchParts.push(`received<=${beforeVal}`);
-    }
-
-    // Graph API queries
-    const queryParams: string[] = [`$top=${options.count}`];
-    queryParams.push(`$select=id,subject,from,toRecipients,receivedDateTime,bodyPreview,isRead`);
-
-    if (searchParts.length > 0) {
-        const q = searchParts.join(' AND ');
-        queryParams.push(`$search="${encodeURIComponent(q)}"`);
+    const count = Math.max(1, Math.min(50, Math.floor(options.count)));
+    if (!Number.isFinite(count)) throw new Error('Invalid email count');
+    const date = (value?: string) => {
+        if (!value) return undefined;
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) throw new Error('Invalid email date');
+        return parsed.toISOString();
+    };
+    const after = date(options.after),
+        before = date(options.before);
+    if (after && before && after > before) throw new Error('Invalid email date range');
+    const url = new URL(`${GRAPH_API_BASE}${apiPath}`);
+    url.searchParams.set('$top', String(count));
+    url.searchParams.set(
+        '$select',
+        'id,subject,from,toRecipients,receivedDateTime,bodyPreview,isRead,inferenceClassification'
+    );
+    if (options.from || options.subject) {
+        const terms = [];
+        if (options.from) terms.push(`from:${options.from.replace(/"/g, '')}`);
+        if (options.subject) terms.push(`subject:${options.subject.replace(/"/g, '')}`);
+        if (after) terms.push(`received>=${after}`);
+        if (before) terms.push(`received<=${before}`);
+        url.searchParams.set('$search', `"${terms.join(' AND ')}"`);
+        // Graph search cannot combine classification/read filters; validate those on each page.
     } else {
-        // Order by date if not searching
-        queryParams.push(`$orderby=receivedDateTime desc`);
+        // Graph requires the ordered property first in the filter, even for classification-only reads.
+        const filters = [`receivedDateTime ge ${after || '0001-01-01T00:00:00Z'}`];
+        if (before) filters.push(`receivedDateTime le ${before}`);
+        if (classification) filters.push(`inferenceClassification eq '${classification}'`);
+        if (options.is_read !== undefined) filters.push(`isRead eq ${options.is_read}`);
+        url.searchParams.set('$filter', filters.join(' and '));
+        url.searchParams.set('$orderby', 'receivedDateTime desc');
     }
-
-    if (inferenceFilter) {
-        // Note: You generally cannot combine $search and $filter on exchange queries the way you expect,
-        // but $filter is required for Focused/Other. If a text search is also requested, Graph API might reject the combination.
-        // As a workaround, we append the filter if there is no search, OR we use the $filter endpoint entirely if searching isn't used.
-        // Actually, $search limits what can be used with $filter. We will prefer $filter if possible.
-        // Because KQL (used in $search) doesn't support inferenceClassification natively, we must rely on $filter if 'other' is requested.
-        queryParams.push(`$filter=${encodeURIComponent(inferenceFilter)}`);
-    }
-
-    const fullPath = `${apiPath}?${queryParams.join('&')}`;
-
-    const data = await graphFetch(accessToken, fullPath);
-
-    return (data.value || []).map((msg: any) => ({
-        id: msg.id,
-        subject: msg.subject || '',
-        from: msg.from?.emailAddress?.address || '',
-        to: (msg.toRecipients || []).map((r: any) => r.emailAddress?.address).join(', '),
-        date: msg.receivedDateTime || '',
-        snippet: msg.bodyPreview || '',
-        isRead: msg.isRead,
-    }));
+    const request = outlookContinuation(url, pageToken);
+    const data = await graphFetch(accessToken, request.toString().slice(GRAPH_API_BASE.length));
+    if (!Array.isArray(data?.value)) throw new Error('Invalid Outlook message page');
+    const messages: EmailMessage[] = data.value
+        .filter(
+            (msg: any) =>
+                (!classification || msg.inferenceClassification === classification) &&
+                (options.is_read === undefined || msg.isRead === options.is_read) &&
+                (!after || Date.parse(msg.receivedDateTime) >= Date.parse(after)) &&
+                (!before || Date.parse(msg.receivedDateTime) <= Date.parse(before))
+        )
+        .slice(0, count)
+        .map((msg: any) => ({
+            id: msg.id,
+            subject: msg.subject || '',
+            from: msg.from?.emailAddress?.address || '',
+            to: (msg.toRecipients || []).map((r: any) => r.emailAddress?.address).join(', '),
+            date: msg.receivedDateTime || '',
+            snippet: msg.bodyPreview || '',
+            isRead: msg.isRead,
+            inferenceClassification: msg.inferenceClassification,
+        }));
+    return { messages, next_page_token: data?.['@odata.nextLink'], exhausted: !data?.['@odata.nextLink'] };
 }
 
 export async function getOutlookMessage(accessToken: string, messageId: string): Promise<EmailMessage> {
@@ -183,11 +185,42 @@ export async function getOutlookMessage(accessToken: string, messageId: string):
     };
 }
 
-export async function moveOutlookMessage(accessToken: string, messageId: string, folderId: string): Promise<void> {
-    await graphFetch(accessToken, `/messages/${encodeGraphId(messageId)}/move`, {
+export async function listOutlookMessagePage(
+    accessToken: string,
+    count = 50,
+    pageToken?: string
+): Promise<{ message_ids: string[]; next_page_token?: string }> {
+    const initial = new URL(`${GRAPH_API_BASE}/mailFolders/inbox/messages`);
+    initial.searchParams.set('$top', String(count));
+    initial.searchParams.set('$select', 'id');
+    const url = outlookContinuation(initial, pageToken);
+    const data = await graphFetch(accessToken, url.toString().slice(GRAPH_API_BASE.length));
+    return {
+        message_ids: (data?.value || []).map((m: { id: string }) => m.id),
+        next_page_token: data?.['@odata.nextLink'],
+    };
+}
+
+export async function moveOutlookMessage(accessToken: string, messageId: string, folderId: string): Promise<string> {
+    const moved = await graphFetch(accessToken, `/messages/${encodeGraphId(messageId)}/move`, {
         method: 'POST',
         body: JSON.stringify({ destinationId: folderId }),
     });
+    if (!moved.id) throw new Error('Microsoft did not return the moved message ID');
+    return moved.id;
+}
+
+export async function draftOutlookReply(
+    accessToken: string,
+    messageId: string,
+    body: string
+): Promise<DraftReplyResult> {
+    const draft = await graphFetch(accessToken, `/messages/${encodeGraphId(messageId)}/createReply`, {
+        method: 'POST',
+        body: JSON.stringify({ message: { body: { contentType: 'Text', content: body } } }),
+    });
+    if (!draft.id || draft.isDraft !== true) throw new Error('Microsoft did not return a reply draft');
+    return { draft_id: draft.id, message_id: draft.id };
 }
 
 export async function deleteOutlookMessage(accessToken: string, messageId: string): Promise<void> {
@@ -385,7 +418,7 @@ export async function moveOutlookToFolder(
     accessToken: string,
     messageId: string,
     folderName: string
-): Promise<{ action: string; folder: string }> {
+): Promise<{ action: string; folder: string; message_id: string }> {
     // Graph API well-known folder names
     const FOLDER_MAP: Record<string, string> = {
         archive: 'archive',
@@ -402,13 +435,13 @@ export async function moveOutlookToFolder(
     const wellKnownId = FOLDER_MAP[normalized];
 
     if (wellKnownId) {
-        await moveOutlookMessage(accessToken, messageId, wellKnownId);
-        return { action: 'moved', folder: normalized };
+        const movedId = await moveOutlookMessage(accessToken, messageId, wellKnownId);
+        return { action: 'moved', folder: normalized, message_id: movedId };
     }
 
     const folderId = await resolveOutlookFolderId(accessToken, folderName, true);
-    await moveOutlookMessage(accessToken, messageId, folderId);
-    return { action: 'moved', folder: folderName };
+    const movedId = await moveOutlookMessage(accessToken, messageId, folderId);
+    return { action: 'moved', folder: folderName, message_id: movedId };
 }
 
 // ── Rule Management ─────────────────────────────────────
@@ -439,7 +472,7 @@ export interface OutlookRule {
 
 export async function listOutlookRules(accessToken: string): Promise<OutlookRule[]> {
     const data = await graphFetch(accessToken, '/mailFolders/inbox/messageRules');
-    return data.value || [];
+    return Array.isArray(data?.value) ? data.value : [];
 }
 
 export async function createOutlookRule(

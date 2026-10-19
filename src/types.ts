@@ -95,3 +95,117 @@ export interface AuditLog {
     error_message: string | null;
     created_at: string;
 }
+export interface DraftReplyResult {
+    draft_id: string;
+    message_id: string;
+}
+
+export interface GmailReplyMetadata {
+    threadId?: string;
+    payload?: { headers?: { name: string; value: string }[] };
+}
+
+export interface GmailMessageMetadata {
+    id: string;
+    threadId: string;
+    payload: { headers: { name: string; value: string }[] };
+    snippet?: string;
+    labelIds?: string[];
+}
+
+export interface EmailRuleConditions {
+    from?: string[];
+    to?: string[];
+    subject?: string[];
+    body?: string[];
+    query?: string;
+    negatedQuery?: string;
+}
+
+export interface EmailRuleActions {
+    addLabels?: string[];
+    removeLabels?: string[];
+    archive?: boolean;
+    markAsRead?: boolean;
+    delete?: boolean;
+    moveToFolder?: string;
+}
+
+export interface GmailMimePart {
+    mimeType?: string;
+    filename?: string;
+    headers?: { name: string; value: string }[];
+    body?: { data?: string; attachmentId?: string; size?: number };
+    parts?: GmailMimePart[];
+}
+
+export interface EmailChangePreview {
+    id: string;
+    addLabelIds: string[];
+    removeLabelIds: string[];
+    reason?: string;
+    before: string[];
+    fingerprint: string;
+}
+
+export interface CalendarSummary {
+    id: string;
+    name: string;
+    primary: boolean;
+    time_zone?: string;
+}
+
+export interface CalendarEvent {
+    id: string;
+    title: string;
+    description: string;
+    location: string;
+    start: string;
+    end: string;
+    time_zone?: string;
+    all_day: boolean;
+    cancelled: boolean;
+}
+
+export interface GoogleCalendarEvent {
+    id: string;
+    summary?: string;
+    description?: string;
+    location?: string;
+    start?: { date?: string; dateTime?: string; timeZone?: string };
+    end?: { date?: string; dateTime?: string; timeZone?: string };
+    status?: string;
+}
+
+export interface GoogleCalendarSummary {
+    id: string;
+    summary?: string;
+    primary?: boolean;
+    timeZone?: string;
+}
+
+export interface MicrosoftCalendarSummary {
+    id: string;
+    name?: string;
+    isDefaultCalendar?: boolean;
+}
+
+export interface CalendarPage<T> {
+    items?: T[];
+    value?: T[];
+    nextPageToken?: string;
+    '@odata.nextLink'?: string;
+    timeZone?: string;
+}
+
+export interface MicrosoftCalendarEvent {
+    originalStartTimeZone?: string;
+    id: string;
+    subject?: string;
+    body?: { content?: string };
+    location?: { displayName?: string };
+    start: { dateTime: string; timeZone: string };
+    end: { dateTime: string; timeZone: string };
+    isAllDay?: boolean;
+    isCancelled?: boolean;
+}

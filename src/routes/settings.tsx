@@ -42,7 +42,7 @@ settings.get('/', async (c) => {
             <div class="page-header">
                 <div>
                     <h1 class="page-title">Settings</h1>
-                    <p class="page-subtitle">Configure email providers to connect your accounts</p>
+                    <p class="page-subtitle">Configure email, calendar and task providers to connect your accounts</p>
                 </div>
             </div>
 
@@ -51,7 +51,7 @@ settings.get('/', async (c) => {
 
             {/* Google Setup */}
             <div style="margin-bottom: 32px;">
-                <Card title="📧 Google (Gmail)">
+                <Card title="📧 Google (Gmail, Calendar, Tasks)">
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 32px;">
                         <div>
                             <h3 style="font-size:14px; font-weight:600; color:var(--text-primary); margin-bottom:12px;">
@@ -59,8 +59,8 @@ settings.get('/', async (c) => {
                             </h3>
                             <ul style="font-size:13px; color:var(--text-secondary); line-height:1.8; padding-left:18px; margin:0; list-style:disc;">
                                 <li>
-                                    Enable the <strong>Gmail API</strong> and <strong>Google Tasks API</strong> in
-                                    Google Cloud.
+                                    Enable the <strong>Gmail API</strong>, <strong>Google Tasks API</strong> and{' '}
+                                    <strong>Google Calendar API</strong> in the same Google Cloud project.
                                 </li>
                                 <li>
                                     Create an <strong>OAuth Client ID</strong> (Web application).
@@ -73,10 +73,64 @@ settings.get('/', async (c) => {
                                     </code>
                                 </li>
                                 <li>
-                                    In the <strong>OAuth consent screen</strong> settings, be sure to add your email
-                                    address under <strong>Test users</strong>.
+                                    In the <strong>OAuth consent screen / Data Access</strong> settings, add the scopes
+                                    listed below. If an external app is in Testing, add your email under{' '}
+                                    <strong>Test users</strong>.
+                                </li>
+                                <li>
+                                    For ongoing personal use, open <strong>Google Auth Platform / Audience</strong>,
+                                    select <strong>Publish app</strong> and confirm <strong>In production</strong>. Keep
+                                    the same project, OAuth client and redirect URI.
                                 </li>
                             </ul>
+
+                            <p style="font-size:12px; color:var(--text-muted); margin-top:12px;">
+                                Testing authorisations expire after 7 days for these Gmail scopes, including refresh
+                                tokens. Regular use and background refresh cannot extend that deadline. After
+                                publishing, reconnect each account through Add Gmail to obtain fresh consent. Do not
+                                disconnect first: reconnecting preserves account IDs and agent grants. Refresh token
+                                cannot recover an expired or revoked Google refresh token.
+                            </p>
+                            <p style="font-size:12px; color:var(--text-muted); margin-top:12px;">
+                                Publishing and verification are separate. Google provides a personal-use verification
+                                exception for fewer than 100 people known personally to the developer. Unverified
+                                warnings and the user cap can remain; wider public services may require verification for
+                                sensitive/restricted scopes. An open-source repository does not make your private
+                                deployment a public service. Each deployment should use its own Google OAuth project.
+                            </p>
+                            <p style="font-size:12px; color:var(--text-muted); margin-top:12px;">
+                                Production is not an email allowlist: External apps can receive consent from other
+                                Google users. e-zer0 still requires admin sign-in to connect accounts or approve agents.
+                                Public MCP registration does not grant mailbox access. Keep admin credentials and OAuth
+                                secrets private, approve only trusted clients, and review Agents permissions. Internal
+                                is suitable only when every account belongs to one Workspace/Cloud Identity
+                                organisation; it cannot cover personal Gmail accounts or multiple organisations.
+                            </p>
+                            <p style="font-size:12px; color:var(--text-muted); margin-top:12px;">
+                                Production removes the Testing deadline, not all expiry: Google can still revoke tokens,
+                                including after inactivity or Gmail password changes. e-zer0 background refresh also
+                                runs for unused active accounts; MCP use is not an inactivity-based retention policy.
+                                Use explicit account/agent revocation rather than relying on expiry for privacy.
+                            </p>
+                            <p style="font-size:12px; color:var(--text-muted); margin-top:12px;">
+                                Google references:{' '}
+                                <a
+                                    href="https://support.google.com/cloud/answer/15549945?hl=en"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                >
+                                    Audience and publishing status
+                                </a>{' '}
+                                and{' '}
+                                <a
+                                    href="https://support.google.com/cloud/answer/13464323?hl=en"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                >
+                                    verification exceptions
+                                </a>
+                                .
+                            </p>
 
                             <details style="margin-top:12px;">
                                 <summary style="font-size:13px; color:var(--text-primary); font-weight:500; cursor:pointer;">
@@ -106,6 +160,18 @@ settings.get('/', async (c) => {
                                         (needed for task management).
                                     </li>
                                     <li>
+                                        Enable the{' '}
+                                        <a
+                                            href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            style="color:var(--accent-hover);"
+                                        >
+                                            Google Calendar API
+                                        </a>{' '}
+                                        in the same project (needed for read-only calendar access).
+                                    </li>
+                                    <li>
                                         Go to{' '}
                                         <a
                                             href="https://console.cloud.google.com/apis/credentials"
@@ -132,11 +198,19 @@ settings.get('/', async (c) => {
                                             <li>
                                                 Add scopes: <code>https://www.googleapis.com/auth/gmail.readonly</code>,{' '}
                                                 <code>https://www.googleapis.com/auth/gmail.modify</code>,{' '}
-                                                <code>https://www.googleapis.com/auth/gmail.settings.basic</code>, and{' '}
-                                                <code>https://www.googleapis.com/auth/tasks</code> (for Google Tasks)
+                                                <code>https://www.googleapis.com/auth/gmail.settings.basic</code>,{' '}
+                                                <code>https://www.googleapis.com/auth/userinfo.email</code>,{' '}
+                                                <code>https://www.googleapis.com/auth/tasks</code> (for Google Tasks),{' '}
+                                                <code>
+                                                    https://www.googleapis.com/auth/calendar.calendarlist.readonly
+                                                </code>{' '}
+                                                (list calendars), and{' '}
+                                                <code>https://www.googleapis.com/auth/calendar.events.readonly</code>{' '}
+                                                (read events, including recurring occurrences).
                                             </li>
                                             <li>
-                                                Add your email as a <strong>test user</strong>
+                                                If the external app is in Testing, add your email as a{' '}
+                                                <strong>test user</strong>.
                                             </li>
                                         </ul>
                                     </li>
@@ -151,7 +225,9 @@ settings.get('/', async (c) => {
                                 </ol>
                             </details>
                             <p style="font-size:12px; color:var(--text-muted); margin-top:12px;">
-                                ⏱ Takes about 5 minutes. This is a one-time setup.
+                                Gmail permissions support read/unread, moves and reply drafts. Google also permits
+                                sending under gmail.modify, but e-zer0 blocks sending. After changing scopes, reconnect
+                                accounts to approve the new permissions.
                             </p>
                         </div>
                         <div>
@@ -262,7 +338,8 @@ settings.get('/', async (c) => {
                                         <code>Mail.Read</code> — read email messages
                                     </li>
                                     <li>
-                                        <code>Mail.ReadWrite</code> — move, archive, delete emails
+                                        <code>Mail.ReadWrite</code> — move, archive, delete, mark read/unread and create
+                                        reply drafts
                                     </li>
                                     <li>
                                         <code style="color:var(--accent-hover);">MailboxSettings.ReadWrite</code>{' '}
@@ -275,6 +352,10 @@ settings.get('/', async (c) => {
                                         tasks (list, create, update, delete)
                                     </li>
                                     <li>
+                                        <code>Calendars.Read</code> — list calendars and read events (no calendar
+                                        changes)
+                                    </li>
+                                    <li>
                                         <code>User.Read</code> — sign in &amp; get email address
                                     </li>
                                     <li>
@@ -283,7 +364,9 @@ settings.get('/', async (c) => {
                                 </ul>
                             </div>
                             <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">
-                                ⏱ Takes about 5 minutes. This is a one-time setup.
+                                Do not add Mail.Send or Calendars.ReadWrite. e-zer0 cannot send emails or change
+                                calendar events. Your organisation may require administrator consent. Reconnect accounts
+                                after changing permissions; refreshing a token does not add new consent.
                             </p>
                         </div>
                         <div>
@@ -317,6 +400,89 @@ settings.get('/', async (c) => {
                             </form>
                         </div>
                     </div>
+                </Card>
+            </div>
+            <Card title="Reconnect and Grant Agent Access">
+                <ol style="font-size:13px; color:var(--text-secondary); line-height:1.8; padding-left:18px;">
+                    <li>Keep your existing OAuth app and credentials when adding these permissions.</li>
+                    <li>
+                        Under Email Accounts, use Add Gmail or Add Outlook / M365 and sign in again to approve the new
+                        scopes. Do not disconnect first: reconnecting the same account preserves its agent grants.
+                    </li>
+                    <li>
+                        Under Agents → Edit, select Calendar (read-only) in the account table and click Save Changes.
+                        Calendar grants are separate from email grants and default to off. Selected accounts grant
+                        access to all calendars readable through that account. No selections is valid.
+                    </li>
+                    <li>
+                        Restart or reconnect your MCP client to refresh its tools. Use list_calendar_accounts,
+                        list_calendars and get_calendar_events to test a short date range with your timezone.
+                    </li>
+                </ol>
+                <p style="font-size:13px; color:var(--text-secondary);">
+                    Calendar access is read-only: no event creation, editing, invitations, deletion or RSVP. Email
+                    replies are saved as drafts only; review and send them yourself in Gmail or Outlook.
+                </p>
+            </Card>
+            <div style="margin-top:24px;">
+                <Card title="Connect ChatGPT">
+                    <ol style="font-size:13px; color:var(--text-secondary); line-height:1.8; padding-left:18px;">
+                        <li>
+                            In ChatGPT, open Plugins → Add → Create custom MCP server. If your interface instead has
+                            Apps → Create with Developer mode, use that entry point.
+                        </li>
+                        <li>
+                            Name it e-zer0 Personal and use <code>{appUrl}/mcp</code>. Select OAuth and complete e-zer0
+                            sign-in and mailbox consent. No manual client secret or bearer-token environment variable is
+                            needed.
+                        </li>
+                        <li>
+                            Under Agents → Edit, select Calendar (read-only) in the account table and click Save
+                            Changes. Email and calendar checkboxes grant access independently. No accounts selected
+                            remains valid.
+                        </li>
+                        <li>
+                            Open the plugin's Permission control and allow the tools you need. Prefer approval prompts
+                            for writes. ChatGPT tool approvals do not grant additional mailbox or calendar access in
+                            e-zer0.
+                        </li>
+                        <li>
+                            Choose Try in chat and ask it to list permitted email and calendar accounts. Use View
+                            details to inspect tools: the connection page does not always show the tool list inline.
+                        </li>
+                        <li>
+                            After server updates, use Manage app → Refresh tools and review permissions. After changing
+                            permissions, start a new chat and select the plugin again. Read/list/search tools should be
+                            labelled read-only; drafts, moves, read/unread changes, rules and task mutations are writes.
+                        </li>
+                    </ol>
+                    <p style="font-size:13px; color:var(--text-secondary);">
+                        A dev mode or DEVELOPMENT label does not mean the connection failed. OAuth connected and tools
+                        discovered do not prove account access: test an actual permitted read before reinstalling. An
+                        email read does not verify calendar access, Outlook access or write actions. ChatGPT
+                        availability and approvals vary by account and surface. Imported MCP plugin archives may be
+                        Desktop only; a Codex MCP configuration is not automatically a ChatGPT web connection.
+                    </p>
+                    <p style="font-size:13px; color:var(--text-secondary);">
+                        Gmail labels: use list_email_labels/create_email_label, then change_email_labels for label-only
+                        changes. These preserve INBOX and UNREAD unless explicitly requested otherwise. For existing
+                        mail, use preview_email_rule, inspect full bodies with get_email, and approve specific IDs with
+                        apply_email_rule_preview. Calendar invitations and incomplete bodies are untouched by previews.
+                        Unknown mention formats require manual review; future Jira filters should label only.
+                        Gmail-native queries and label actions are not supported by Outlook rules. search_email_page
+                        provides paged IDs. get_emails also returns next_page_token and exhausted for both providers.
+                        Repeat the same account, filters and count with that token until exhausted is true, even after a
+                        short or empty page. Tokens expire after 30 minutes. Outlook Other and Focused are Inbox
+                        classifications; text-search pages may be sparse after classification/read filtering.
+                    </p>
+                    <p style="font-size:13px; color:var(--text-secondary);">
+                        A cancelled tool result does not prove a human cancelled it. Record the tool, UTC timestamps,
+                        account ID and request ID for log correlation. Server diagnostics distinguish peer cancellation,
+                        request aborts, provider failures and completed responses. There is no short server timeout; the
+                        client may still impose its own limit. If a prepared tool catalog becomes stale after
+                        deployment, refresh tools and start a new chat before retrying. Reconcile uncertain writes
+                        before repeating them.
+                    </p>
                 </Card>
             </div>
         </Layout>

@@ -15,6 +15,66 @@ import {
 
 const mcp = new Hono<{ Bindings: Env }>();
 
+// Observe transport signals without inferring a human cancellation or logging payloads/tokens.
+mcp.use('*', async (c, next) => {
+    if (c.req.path.endsWith('/token')) return next();
+    const started = Date.now();
+    const requestId = crypto.randomUUID();
+    const trace = (event: string, extra: Record<string, unknown> = {}) =>
+        console.log(
+            JSON.stringify({
+                event,
+                request_id: requestId,
+                cf_ray: c.req.header('cf-ray') || null,
+                catalog_version: '1.1.1',
+                duration_ms: Date.now() - started,
+                ...extra,
+            })
+        );
+    trace('mcp_transport_started', { method: c.req.method });
+    c.req.raw.signal.addEventListener(
+        'abort',
+        () => trace('incoming_request_aborted', { source: 'request_signal_not_proof_of_user_action' }),
+        { once: true }
+    );
+    c.header('X-Ezer0-Catalog-Version', '1.1.1');
+    c.header('X-Ezer0-Request-Id', requestId);
+    try {
+        await next();
+    } catch (error) {
+        trace('mcp_transport_threw', { error_name: error instanceof Error ? error.name : 'Error' });
+        throw error;
+    }
+    const status = c.res.status;
+    trace('mcp_response_started', { status });
+    if (!c.res.body) {
+        trace('mcp_response_completed', { status });
+        return;
+    }
+    const reader = c.res.body.getReader();
+    c.res = new Response(
+        new ReadableStream({
+            async pull(controller) {
+                try {
+                    const result = await reader.read();
+                    if (result.done) {
+                        trace('mcp_response_completed', { status });
+                        controller.close();
+                    } else controller.enqueue(result.value);
+                } catch (error) {
+                    trace('mcp_response_stream_failed', { error_name: error instanceof Error ? error.name : 'Error' });
+                    controller.error(error);
+                }
+            },
+            async cancel(reason) {
+                trace('mcp_response_stream_cancelled', { source: 'peer_stream_not_proof_of_user_action' });
+                await reader.cancel(reason);
+            },
+        }),
+        { status, statusText: c.res.statusText, headers: c.res.headers }
+    );
+});
+
 // ── Simple JWT Implementation ───────────────────────────
 // Using a compact HMAC-SHA256 signed token (no external JWT library needed)
 
@@ -311,7 +371,7 @@ const handleMcpConnection = async (c: Context<{ Bindings: Env }>) => {
             const bodyText = await reqClone.text();
             if (bodyText) {
                 const body = JSON.parse(bodyText);
-                const rpcId = body.id || (Array.isArray(body) ? body.map((b: any) => b.id).join(',') : 'unknown');
+                const rpcId = body.id ?? (Array.isArray(body) ? body.map((b: any) => b.id).join(',') : 'unknown');
                 const rpcMethod =
                     body.method || (Array.isArray(body) ? body.map((b: any) => b.method).join(',') : 'unknown');
 
@@ -326,6 +386,14 @@ const handleMcpConnection = async (c: Context<{ Bindings: Env }>) => {
                         client_name: clientName,
                         mcp_request_id: rpcId,
                         mcp_method: rpcMethod,
+                        tool_name: body.method === 'tools/call' ? body.params?.name : undefined,
+                        cancellation_source:
+                            body.method === 'notifications/cancelled'
+                                ? 'peer_mcp_notification_not_proof_of_user_action'
+                                : undefined,
+                        cancelled_request_id:
+                            body.method === 'notifications/cancelled' ? body.params?.requestId : undefined,
+                        catalog_version: '1.1.1',
                         cf_ray: cfRay,
                         traceparent: traceparent,
                     })
@@ -370,7 +438,7 @@ mcp.get('/', async (c) => {
 
     return c.json({
         name: 'e-zer0 MCP Server',
-        version: '1.0.0',
+        version: '1.1.1',
         transport: 'streamable-http',
         endpoints: {
             token: '/mcp/token',
