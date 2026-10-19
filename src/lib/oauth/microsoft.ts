@@ -8,6 +8,7 @@ const MS_SCOPES = [
     'https://graph.microsoft.com/Mail.ReadWrite',
     'https://graph.microsoft.com/MailboxSettings.ReadWrite',
     'https://graph.microsoft.com/Tasks.ReadWrite',
+    'https://graph.microsoft.com/Calendars.Read',
     'https://graph.microsoft.com/User.Read',
     'offline_access',
 ].join(' ');
@@ -63,7 +64,7 @@ export async function refreshMicrosoftToken(
             client_id: clientId,
             client_secret: clientSecret,
             grant_type: 'refresh_token',
-            scope: MS_SCOPES,
+            // Retain the original consent scopes; adding calendar support must not break old mailbox tokens.
         }),
     });
 

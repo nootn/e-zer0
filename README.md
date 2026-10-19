@@ -1,5 +1,8 @@
 # e-zer0: The AI-Native Inbox Manager
 
+See [Safe email labels and filters](docs/email-labels-and-filters.md) for preview-first
+Gmail management, provider differences, retry safety and required migrations.
+
 e-zer0 is a self-hosted, secure bridge between your AI agents and your email accounts. It allows you to give AI tools (like Claude Desktop or custom agents) the ability to read, search, and manage your emails across Gmail, Microsoft 365, and Outlook—without ever handing over your raw email credentials.
 
 ## Why does this exist?
@@ -49,7 +52,31 @@ e-zer0 normalizes the differences between email providers so your AI agents don'
 - **"List folders"** → Returns Gmail labels or Outlook folders — unified response
 - Custom folder/label creation works transparently across both
 
+### Drafts and Manual Email Management
+
+- `manage_email` supports `mark_read` and `mark_unread` on both providers.
+- `draft_email_reply` creates a plain-text reply draft to an existing message. It uses the original sender or Reply-To, with no recipient override, attachments or reply-all. Each call creates a new draft; check your Drafts folder before retrying after an uncertain response.
+- `organize_email` moves messages without creating a rule. For Gmail, custom destinations add a label and remove INBOX; supply `source_label` to remove a specific old label while retaining unrelated labels. Outlook moves return the new `message_id`, which should be used for subsequent operations.
+- Every operation requires the agent's existing mailbox grant and is audited. Draft content is not included in the audit details.
+
+**Sending is disabled in e-zer0.** Review and send drafts yourself in Gmail or Outlook. Provider request helpers reject send, reply, reply-all and forward endpoints; no send tool is exposed. Gmail's existing `gmail.modify` permission also permits sending at Google's API level, so this is an application restriction, not a Google permission boundary. Microsoft uses `Mail.ReadWrite`, without requesting `Mail.Send`. No additional OAuth scopes are needed for these features. If old provider consent has expired, reconnect using **Add Gmail** or **Add Outlook / M365** without disconnecting first to preserve existing agent grants.
+
+### Read-Only Calendars
+
+Google Calendar and Outlook/M365 calendars are available through `list_calendar_accounts`, `list_calendars` and `get_calendar_events`. Event reads expand recurring occurrences for an explicit date range, with pagination and a maximum 366-day range. Calendar names and event text use the existing content sanitisation and injection warnings; tool success/failure is audited without event content. There are no calendar write, invitation or RSVP tools.
+
+Calendar grants are **separate from mailbox grants and default to off**. After connecting an account, open **Agents > Edit**, select the **Email** and **Calendar (read-only)** checkboxes in the account table, and click **Save Changes**. Both permissions and the agent name are saved together. The same table is available when creating an agent. Calendar access covers all calendars readable through each selected account, not individual calendars. Empty selections are valid. Calendar grants survive email re-authorisation and reconnects; inactive account grants are visible in the editor and can be revoked there.
+
+Provider setup: enable the **Google Calendar API** in the same Google Cloud project and allow `calendar.calendarlist.readonly` and `calendar.events.readonly` on the consent configuration. Microsoft uses delegated `Calendars.Read` (not `Calendars.ReadWrite`); your organisation may require admin consent. Reconnect using **Add Gmail / Add Outlook** to approve calendar scopes, without disconnecting first. Microsoft token refresh retains existing consent rather than trying to add scopes without a new sign-in.
+
+Restart/reconnect your MCP client to refresh its tool list. Test by listing calendar accounts, listing calendars and reading a short date range using your timezone, for example `2026-10-05T00:00:00+10:00` to `2026-10-06T00:00:00+10:00` for Brisbane. Check a recurring meeting and an all-day event against the provider UI. Google all-day values are dates with an exclusive end date; Microsoft timestamps are UTC with the original timezone retained. Shared/delegated calendars remain subject to provider permissions; cross-user Microsoft calendar delegation is not implemented.
+
 ## 🔐 Zero-Config Deployment
+
+For ongoing Gmail access, follow [Google OAuth setup, publishing and privacy](docs/google-oauth-setup.md).
+External apps in Testing expire after seven days; private personal-use deployments
+can use In production under Google's verification exception without making their
+mailboxes public. Keep admin access and agent permissions restricted.
 
 e-zer0 requires **only your Cloudflare credentials** to deploy. Everything else is managed through the UI:
 

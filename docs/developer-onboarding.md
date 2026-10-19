@@ -2,6 +2,8 @@
 
 This guide explains how e-zer0 is built, how the pieces fit together, and what you need to know to contribute or customize it.
 
+For provider configuration, read [Google OAuth setup, token expiry and deployment privacy](google-oauth-setup.md).
+
 ---
 
 ## Architecture Overview
@@ -41,20 +43,21 @@ e-zer0 is a **server-side rendered (SSR) web application** — not a SPA. There 
 
 ## Technology Stack
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **Runtime** | [Cloudflare Workers](https://developers.cloudflare.com/workers/) | Serverless edge compute (V8 isolates, not Node.js) |
-| **Framework** | [Hono](https://hono.dev/) | Lightweight web framework (Express-like, but for edge) |
-| **Templating** | [Hono JSX](https://hono.dev/docs/guides/jsx) | Server-side JSX → HTML rendering (looks like React, but it's just string concatenation at build time) |
-| **Database** | [Cloudflare D1](https://developers.cloudflare.com/d1/) | SQLite at the edge (SQL database) |
-| **Vector DB** | [Cloudflare Vectorize](https://developers.cloudflare.com/vectorize/) | Vector embeddings for semantic email search |
-| **AI** | [Workers AI](https://developers.cloudflare.com/workers-ai/) | Generates text embeddings (for Vectorize) |
-| **Local Dev** | [Wrangler](https://developers.cloudflare.com/workers/wrangler/) | Cloudflare's CLI — runs the full Workers environment locally |
-| **Styling** | Vanilla CSS | Single `layout.tsx` with embedded styles, no Tailwind |
+| Layer          | Technology                                                           | Purpose                                                                                               |
+| -------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Runtime**    | [Cloudflare Workers](https://developers.cloudflare.com/workers/)     | Serverless edge compute (V8 isolates, not Node.js)                                                    |
+| **Framework**  | [Hono](https://hono.dev/)                                            | Lightweight web framework (Express-like, but for edge)                                                |
+| **Templating** | [Hono JSX](https://hono.dev/docs/guides/jsx)                         | Server-side JSX → HTML rendering (looks like React, but it's just string concatenation at build time) |
+| **Database**   | [Cloudflare D1](https://developers.cloudflare.com/d1/)               | SQLite at the edge (SQL database)                                                                     |
+| **Vector DB**  | [Cloudflare Vectorize](https://developers.cloudflare.com/vectorize/) | Vector embeddings for semantic email search                                                           |
+| **AI**         | [Workers AI](https://developers.cloudflare.com/workers-ai/)          | Generates text embeddings (for Vectorize)                                                             |
+| **Local Dev**  | [Wrangler](https://developers.cloudflare.com/workers/wrangler/)      | Cloudflare's CLI — runs the full Workers environment locally                                          |
+| **Styling**    | Vanilla CSS                                                          | Single `layout.tsx` with embedded styles, no Tailwind                                                 |
 
 ### ⚠️ Important: This is NOT Node.js
 
 Cloudflare Workers run on **V8 isolates**, not Node.js. This means:
+
 - No `fs`, `path`, `http`, or other Node built-in modules
 - No `npm` packages that depend on Node APIs (use edge-compatible packages only)
 - Crypto is via the Web Crypto API (`crypto.subtle`), not `require('crypto')`
@@ -189,13 +192,16 @@ settings.get('/', async (c) => {
     // c.html() sends the rendered HTML string as the response
     return c.html(
         <Layout title="Accounts">
-            {accounts.results.map(a => <p>{a.email}</p>)}
+            {accounts.results.map((a) => (
+                <p>{a.email}</p>
+            ))}
         </Layout>
     );
 });
 ```
 
 **Key differences from React:**
+
 - No `useState`, `useEffect`, or any hooks
 - No client-side hydration or re-rendering
 - No event handlers (onclick, etc.) — use HTML forms and links
@@ -210,14 +216,14 @@ settings.get('/', async (c) => {
 
 All persistent data lives in Cloudflare D1, an edge SQLite database:
 
-| Table | Purpose |
-|-------|---------|
-| `admin_users` | Admin credentials (password hashed with PBKDF2) |
-| `sessions` | Active login sessions (cookie tokens) |
+| Table            | Purpose                                                 |
+| ---------------- | ------------------------------------------------------- |
+| `admin_users`    | Admin credentials (password hashed with PBKDF2)         |
+| `sessions`       | Active login sessions (cookie tokens)                   |
 | `email_accounts` | Connected email accounts (tokens encrypted AES-256-GCM) |
-| `mcp_clients` | Registered AI agent credentials |
-| `audit_logs` | Every MCP action logged with timestamp |
-| `app_settings` | Encrypted OAuth credentials + auto-generated keys |
+| `mcp_clients`    | Registered AI agent credentials                         |
+| `audit_logs`     | Every MCP action logged with timestamp                  |
+| `app_settings`   | Encrypted OAuth credentials + auto-generated keys       |
 
 ### Encryption Model
 
@@ -241,6 +247,7 @@ The `ENCRYPTION_KEY` and `JWT_SECRET` are managed as **Cloudflare Secrets** in p
 ## How to Add a New Page
 
 1. Create `src/routes/my-page.tsx`:
+
 ```tsx
 /** @jsxImportSource hono/jsx */
 import { Hono } from 'hono';
@@ -264,6 +271,7 @@ export default myPage;
 ```
 
 2. Mount it in `src/app.ts`:
+
 ```ts
 import myPageRoutes from './routes/my-page';
 app.route('/my-page', myPageRoutes);
@@ -278,6 +286,7 @@ That's it — no build config changes, no router config, no lazy loading.
 ## How to Add a New MCP Tool
 
 1. Add the tool implementation in `src/mcp/tools.ts`:
+
 ```ts
 export async function myNewTool(env: Env, ...args): Promise<any> {
     // Implementation
@@ -285,6 +294,7 @@ export async function myNewTool(env: Env, ...args): Promise<any> {
 ```
 
 2. Register it in `src/mcp/server.ts`:
+
 ```ts
 server.tool('my_new_tool', 'Description for AI agents', { /* zod schema */ }, async (args) => {
     const result = await myNewTool(env, args.whatever);
@@ -303,12 +313,12 @@ Alongside email, e-zer0 exposes a unified **tasks** layer over Google Tasks (Gma
 
 Provider differences are hidden in `src/lib/tasks/`:
 
-| Concept | Google Tasks | Microsoft To Do |
-|---------|--------------|-----------------|
-| Default list | `@default` tasklist id | list where `wellknownListName === 'defaultList'` |
-| Status | `needsAction` / `completed` | `notStarted` / `completed` (unified to `open` / `completed`) |
-| Due date | `due` (RFC3339, date honored only) | `dueDateTime: { dateTime, timeZone }` (no trailing `Z`) |
-| Notes | `notes` string | `body: { content, contentType: 'text' }` |
+| Concept      | Google Tasks                       | Microsoft To Do                                              |
+| ------------ | ---------------------------------- | ------------------------------------------------------------ |
+| Default list | `@default` tasklist id             | list where `wellknownListName === 'defaultList'`             |
+| Status       | `needsAction` / `completed`        | `notStarted` / `completed` (unified to `open` / `completed`) |
+| Due date     | `due` (RFC3339, date honored only) | `dueDateTime: { dateTime, timeZone }` (no trailing `Z`)      |
+| Notes        | `notes` string                     | `body: { content, contentType: 'text' }`                     |
 
 ### Required OAuth scopes
 
@@ -349,7 +359,29 @@ npm run db:reset:local:unix     # macOS/Linux equivalent
 
 ## Deployment
 
+### Email read limits
+
+See [Safe email labels and filters](email-labels-and-filters.md) for preview/apply,
+provider capabilities, account-27 examples, migration and transport diagnostics.
+
+Gmail list/search reads fetch message metadata through the native Gmail batch API,
+in sequential groups of ten. A 50-message read uses six external HTTP requests
+(one list plus five batches), rather than 51. Gmail still charges each inner
+read against its API quota. Outlook already returns message summaries in one
+Graph request. Neither path retries mailbox mutations automatically.
+
+Keep deployments compatible with Workers Free's 50 external subrequests per
+invocation. Delays or parallelism do not reset that cumulative limit, and raising
+it via `[limits]` requires a paid plan. A multipart batch or per-message failure
+must fail the tool, not silently return a partial result. Gmail successful
+delete/update responses may be empty; do not assume an empty success is a failure
+or blindly repeat a deletion.
+
+References: [Gmail batching](https://developers.google.com/workspace/gmail/api/guides/batch)
+and [Cloudflare limits](https://developers.cloudflare.com/workers/platform/limits/).
+
 Only **2 secrets** are needed for deployment:
+
 - `CLOUDFLARE_API_TOKEN` — for the GitHub Action to deploy
 - `CLOUDFLARE_ACCOUNT_ID` — your Cloudflare account
 
