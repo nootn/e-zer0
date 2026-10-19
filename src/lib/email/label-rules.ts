@@ -10,7 +10,7 @@ import {
     createGmailFilter,
     findGmailFilter,
 } from './gmail';
-import type { GmailFilterCriteria, GmailFilterAction } from './gmail';
+import type { GmailFilterCriteria, GmailFilterAction, GmailFilter } from './gmail';
 import type { EmailMessage } from './gmail';
 
 export function gmailRuleQuery(conditions: EmailRuleConditions): string {
@@ -144,14 +144,21 @@ export async function createGmailFilterSafely(
     criteria: GmailFilterCriteria,
     action: GmailFilterAction
 ) {
-    const existing = await findGmailFilter(token, criteria, action);
-    if (existing) return existing;
     const definition = JSON.stringify({ criteria, action }, (_, value) => {
         if (Array.isArray(value)) return [...value].sort();
         if (value && typeof value === 'object')
             return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)));
         return value;
     });
+    const remember = async (filter: GmailFilter) => {
+        await db
+            .prepare('UPDATE filter_write_intents SET provider_id = ? WHERE account_id = ? AND definition = ?')
+            .bind(filter.id, account, definition)
+            .run();
+        return filter;
+    };
+    const existing = await findGmailFilter(token, criteria, action);
+    if (existing) return remember(existing);
     const owner = crypto.randomUUID();
     await db
         .prepare(
@@ -165,7 +172,7 @@ export async function createGmailFilterSafely(
         .first<{ owner: string }>();
     if (claim?.owner !== owner) {
         const reconciled = await findGmailFilter(token, criteria, action);
-        if (reconciled) return reconciled;
+        if (reconciled) return remember(reconciled);
         throw new Error(
             'Filter creation pending or uncertain. No duplicate POST was sent. Reconcile with list_email_rules; administrator intervention is required if the filter remains absent.'
         );

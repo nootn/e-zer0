@@ -253,7 +253,7 @@ export async function getGmailMessage(accessToken: string, messageId: string): P
         }
         if (/^text\/calendar(?:;|$)/i.test(part.mimeType || '') || /\.(ics|ical)$/i.test(part.filename || ''))
             calendar = true;
-        if (/^text\/(plain|html)$/i.test(part.mimeType || '') && !part.filename) {
+        if (/^text\/(plain|html)$/i.test(part.mimeType || '')) {
             let data = part.body?.data;
             if (!data && part.body?.attachmentId) {
                 if (attachmentReads++ >= 4) {
@@ -277,7 +277,7 @@ export async function getGmailMessage(accessToken: string, messageId: string): P
                 texts.push(decoded);
             } else if ((part.body?.size || 0) > 0) complete = false;
         } else if (
-            !part.filename &&
+            (!part.filename || /^\s*inline(?:;|$)/i.test(decodeHeader(part.headers || [], 'Content-Disposition'))) &&
             (part.body?.data || part.body?.attachmentId || (part.body?.size || 0) > 0) &&
             !part.parts?.length &&
             !/^text\/calendar(?:;|$)/i.test(part.mimeType || '')

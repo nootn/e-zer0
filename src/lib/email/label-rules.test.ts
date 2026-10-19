@@ -202,7 +202,7 @@ it('previews a page read-only, rejects unrelated/calendar mail and applies only 
 });
 
 function intentDatabase(): D1Database {
-    const rows = new Map<string, { owner: string }>();
+    const rows = new Map<string, { owner: string; provider_id?: string }>();
     return {
         prepare(sql: string) {
             let args: unknown[] = [];
@@ -216,6 +216,15 @@ function intentDatabase(): D1Database {
                         const key = `${args[0]}:${args[1]}`;
                         if (!rows.has(key)) rows.set(key, { owner: String(args[2]) });
                     }
+                    if (sql.startsWith('UPDATE')) {
+                        const row = rows.get(`${args[1]}:${args[2]}`);
+                        if (row) row.provider_id = String(args[0]);
+                    }
+                    if (sql.startsWith('DELETE')) {
+                        for (const [key, row] of rows) {
+                            if (key.startsWith(`${args[0]}:`) && row.provider_id === args[1]) rows.delete(key);
+                        }
+                    }
                     return {};
                 },
                 async first() {
@@ -225,6 +234,55 @@ function intentDatabase(): D1Database {
         },
     } as unknown as D1Database;
 }
+
+it('records a reconciled filter ID so confirmed deletion permits recreation', async () => {
+    const db = intentDatabase();
+    let filter: { id: string; criteria: { from: string }; action: { addLabelIds: string[] } } | undefined;
+    let uncertain = true;
+    vi.stubGlobal(
+        'fetch',
+        vi.fn(async (_url: string, init?: RequestInit) => {
+            if (init?.method === 'POST') {
+                if (uncertain) throw new Error('lost response');
+                filter = { id: 'replacement', criteria: { from: jira }, action: { addLabelIds: ['Label_1'] } };
+                return Response.json(filter);
+            }
+            return Response.json({ filter: filter ? [filter] : [] });
+        })
+    );
+    const args = [db, 1, 'token', { from: jira }, { addLabelIds: ['Label_1'] }] as const;
+    await expect(createGmailFilterSafely(...args)).rejects.toThrow('lost response');
+    filter = { id: 'reconciled', criteria: { from: jira }, action: { addLabelIds: ['Label_1'] } };
+    expect((await createGmailFilterSafely(...args)).id).toBe('reconciled');
+    await db
+        .prepare('DELETE FROM filter_write_intents WHERE account_id = ? AND provider_id = ?')
+        .bind(1, filter.id)
+        .run();
+    filter = undefined;
+    uncertain = false;
+    expect((await createGmailFilterSafely(...args)).id).toBe('replacement');
+});
+
+it.each(['text/html', 'text/plain'])('includes named inline %s bodies in mention protection', async (mimeType) => {
+    vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+            Response.json({
+                id: 'inline',
+                labelIds: ['INBOX', 'UNREAD'],
+                payload: {
+                    mimeType,
+                    filename: 'body.html',
+                    headers: [{ name: 'Content-Disposition', value: 'inline; filename="body.html"' }],
+                    body: { data: btoa('Alex mentioned you') },
+                },
+            })
+        )
+    );
+    const message = await getGmailMessage('token', 'inline');
+    expect(message.body).toContain('Alex mentioned you');
+    expect(planGmailChanges(message, { archive: true }, ['Alex']).removeLabelIds).toEqual([]);
+});
 
 it('a concurrent or uncertain filter create never issues a duplicate POST', async () => {
     const db = intentDatabase();
