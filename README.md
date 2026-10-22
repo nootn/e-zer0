@@ -149,6 +149,18 @@ In local development, the Turnstile widget is not shown and the challenge is ski
 
 > Want a provider added? [Open an issue](https://github.com/nootn/e-zer0/issues) or submit a PR!
 
+## Contributing
+
+Contributions are welcome, whether this is your first open-source PR or you already
+maintain a project. Bug reports, documentation improvements, tests, accessibility
+fixes and provider improvements all help.
+
+Feel free to fork e-zer0, run your own instance and adapt it under the
+[MIT licence](LICENSE). To contribute a change back, follow the
+[contribution guide](CONTRIBUTING.md) and open a PR against `main`. Small fixes and
+documentation PRs are welcome directly; for larger features, start with an
+[issue](https://github.com/nootn/e-zer0/issues) to discuss the idea.
+
 ## �🛠 Developer Commands
 
 | Command                       | Description                                                   |
