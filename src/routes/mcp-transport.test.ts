@@ -72,7 +72,7 @@ it('reports HTTP status/catalog/request ID and completion without leaking author
     const result = await app.fetch(new Request('https://example.com/mcp', { method: 'POST' }), {} as Env);
     expect(result.status).toBe(401);
     await result.text();
-    expect(result.headers.get('X-Ezer0-Catalog-Version')).toBe('1.1.1');
+    expect(result.headers.get('X-Ezer0-Catalog-Version')).toBe('1.1.2');
     expect(result.headers.get('X-Ezer0-Request-Id')).toBeTruthy();
     expect(logs.map((log) => JSON.parse(log).event)).toContain('mcp_response_completed');
     expect(logs.join(' ')).not.toContain('Authorization');

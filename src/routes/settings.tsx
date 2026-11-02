@@ -423,6 +423,24 @@ settings.get('/', async (c) => {
                     Calendar access is read-only: no event creation, editing, invitations, deletion or RSVP. Email
                     replies are saved as drafts only; review and send them yourself in Gmail or Outlook.
                 </p>
+                <p style="font-size:13px; color:var(--text-secondary);">
+                    Calendar reads refresh tokens expiring within 60 seconds and attempt at most one token refresh per
+                    call using existing consent. A provider 401 means invalid or expired credentials, not proof of
+                    missing calendar consent. A 403 is not automatically retried. Calendar failures do not revoke grants
+                    or mark email access as broken. Toggling Calendar in Agents changes the agent grant, not provider
+                    OAuth consent; do not reconnect or broaden permissions without explaining which account and
+                    permission need attention.
+                </p>
+                <p style="font-size:13px; color:var(--text-secondary);">
+                    Calendar errors include structuredContent.error.code to distinguish calendar_grant_missing,
+                    provider_token_invalid, provider_scope_missing and provider_calendar_forbidden. Use current IDs from
+                    list_calendar_accounts, not remembered personal/work labels. Client-blocked and not checked are
+                    different from a server denial; never override a genuine prior user restriction automatically.
+                    Successful reads report safe expiry/refresh metadata. Provider-returned scopes are recorded when
+                    available; unknown scopes do not mean permission is missing. Permission edits and OAuth mailbox
+                    consent now record atomic before/after account-ID snapshots in Audit Log. See{' '}
+                    <code>docs/calendar-access-and-recovery.md</code> in the repository for the diagnostic reference.
+                </p>
             </Card>
             <div style="margin-top:24px;">
                 <Card title="Connect ChatGPT">

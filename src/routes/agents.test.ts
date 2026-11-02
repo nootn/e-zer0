@@ -104,13 +104,14 @@ it('saves name and both grant sets in one batch, deduplicates, and allows empty 
     const { db, batch } = fixture();
     await updateAgentNameAndAccounts(db, 1, 'New name', [1, 1], [2, 2]);
     const statements = batch.mock.calls[0][0] as unknown as { sql: string; values: unknown[] }[];
-    expect(statements).toHaveLength(5);
-    expect(statements[0].values).toEqual(['New name', 1]);
-    expect(statements[2].values).toEqual([1, 1]);
-    expect(statements[4].values).toEqual([1, 2]);
-    expect(statements[3].sql).toContain('DELETE FROM mcp_client_calendar_accounts');
+    expect(statements).toHaveLength(6);
+    expect(statements[0].sql).toContain('INSERT INTO audit_logs');
+    expect(statements[1].values).toEqual(['New name', 1]);
+    expect(statements[3].values).toEqual([1, 1]);
+    expect(statements[5].values).toEqual([1, 2]);
+    expect(statements[4].sql).toContain('DELETE FROM mcp_client_calendar_accounts');
     await updateAgentNameAndAccounts(db, 1, 'New name', [], []);
-    expect(batch.mock.calls[1][0]).toHaveLength(3);
+    expect(batch.mock.calls[1][0]).toHaveLength(4);
 });
 
 it.each([[999], [1.5], [NaN]])('rejects invalid grants before any edits (%s)', async (invalid) => {
@@ -148,7 +149,9 @@ it.each([false, true])(
         if (combined) body.set('permissions_form', 'combined');
         await agents.request('/1/accounts', { method: 'POST', body }, { DB: db });
         const statements = batch.mock.calls[0][0] as unknown as { sql: string }[];
-        expect(statements.some((statement) => statement.sql.includes('mcp_client_calendar_accounts'))).toBe(combined);
+        expect(statements.some((statement) => statement.sql.includes('DELETE FROM mcp_client_calendar_accounts'))).toBe(
+            combined
+        );
     }
 );
 

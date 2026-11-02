@@ -10,6 +10,7 @@ import type {
 
 // Read-only requests; provider errors must not leak calendar content into audit logs.
 import { providerRequest } from './provider-request';
+import { calendarProviderError } from './calendar-errors';
 async function readCalendar<T>(url: URL, token: string): Promise<T> {
     const response = await providerRequest('calendar', url.toString(), {
         headers: {
@@ -18,9 +19,7 @@ async function readCalendar<T>(url: URL, token: string): Promise<T> {
         },
     });
     if (!response.ok)
-        throw new Error(
-            `Calendar API error (${response.status}). Reconnect the account if calendar consent is missing.`
-        );
+        throw await calendarProviderError(response, url.hostname === 'graph.microsoft.com' ? 'microsoft' : 'google');
     return response.json() as Promise<T>;
 }
 

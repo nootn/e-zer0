@@ -29,7 +29,7 @@ it.each([true, false])('requires a separate calendar grant and audits success/fa
                             return allowed ? { permitted: 1 } : null;
                         }
                         if (sql.includes('mcp_client_accounts')) return { permitted: 1 };
-                        return { id: 1, provider: 'google', encrypted_access_token: encrypted };
+                        return { id: 1, provider: 'google', status: 'active', encrypted_access_token: encrypted };
                     },
                     async run() {
                         audit.push(values);
@@ -70,10 +70,21 @@ it.each([true, false])('requires a separate calendar grant and audits success/fa
             },
         });
         expect(Boolean(result.isError)).toBe(!allowed);
+        if (!allowed)
+            expect(result.structuredContent).toMatchObject({
+                error: { code: 'calendar_grant_missing', account_id: 1 },
+            });
+        else
+            expect(JSON.parse((result.content as { text: string }[])[0].text).access).toMatchObject({
+                account_id: 1,
+                scopes_recorded: false,
+                refreshed: false,
+            });
         expect(audit).toHaveLength(1);
         expect(audit[0][2]).toBe('get_calendar_events');
         expect(audit[0][5]).toBe(allowed ? 1 : 0);
         expect(JSON.stringify(audit)).not.toContain('4111111111111111');
+        expect(JSON.stringify(audit)).not.toContain('test-token');
         if (allowed) {
             expect(JSON.stringify(result)).not.toContain('4111111111111111');
             expect(JSON.stringify(result)).toContain('injection_warnings');

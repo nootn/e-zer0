@@ -7,6 +7,7 @@ import { refreshMicrosoftToken } from './lib/oauth/microsoft';
 import { getEncryptionKey } from './lib/keys';
 import { getOAuthCredentials } from './lib/settings';
 import { refreshAccountToken } from './lib/oauth/refresh';
+import { markAccountRefreshFailed } from './lib/oauth/refresh-failure';
 
 export default {
     // ── HTTP Handler ──────────────────────────────────────
@@ -39,11 +40,7 @@ export default {
                 console.log(`Refreshed token for account ${account.id} (${account.email_address})`);
             } catch (err: any) {
                 console.error(`Failed to refresh token for account ${account.id}:`, err.message);
-                await env.DB.prepare(
-                    `UPDATE email_accounts SET status = 'expired', updated_at = datetime('now') WHERE id = ?`
-                )
-                    .bind(account.id)
-                    .run();
+                await markAccountRefreshFailed(env.DB, account, 'expired');
             }
         }
     },

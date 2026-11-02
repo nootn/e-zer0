@@ -26,7 +26,7 @@ mcp.use('*', async (c, next) => {
                 event,
                 request_id: requestId,
                 cf_ray: c.req.header('cf-ray') || null,
-                catalog_version: '1.1.1',
+                catalog_version: '1.1.2',
                 duration_ms: Date.now() - started,
                 ...extra,
             })
@@ -45,7 +45,7 @@ mcp.use('*', async (c, next) => {
     }
     const status = c.res.status;
     const headers = new Headers(c.res.headers);
-    headers.set('X-Ezer0-Catalog-Version', '1.1.1');
+    headers.set('X-Ezer0-Catalog-Version', '1.1.2');
     headers.set('X-Ezer0-Request-Id', requestId);
     trace('mcp_response_started', { status });
     if (!c.res.body) {
@@ -399,7 +399,7 @@ const handleMcpConnection = async (c: Context<{ Bindings: Env }>) => {
                                 : undefined,
                         cancelled_request_id:
                             body.method === 'notifications/cancelled' ? body.params?.requestId : undefined,
-                        catalog_version: '1.1.1',
+                        catalog_version: '1.1.2',
                         cf_ray: cfRay,
                         traceparent: traceparent,
                     })

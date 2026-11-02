@@ -185,8 +185,9 @@ it('validates selections before atomically replacing only calendar grants', asyn
     await expect(updateCalendarGrants(db, '1', [999])).rejects.toThrow('Invalid calendar account');
     expect(batch).not.toHaveBeenCalled();
     await updateCalendarGrants(db, '1', [2, 2]);
-    expect(batch.mock.calls[0][0]).toHaveLength(2);
+    expect(batch.mock.calls[0][0]).toHaveLength(3);
+    expect(sql.some((query) => query.includes('INSERT INTO audit_logs'))).toBe(true);
     expect(sql.some((query) => query.includes('DELETE FROM mcp_client_accounts '))).toBe(false);
     await updateCalendarGrants(db, '1', []);
-    expect(batch.mock.calls[1][0]).toHaveLength(1);
+    expect(batch.mock.calls[1][0]).toHaveLength(2);
 });

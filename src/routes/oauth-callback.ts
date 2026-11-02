@@ -75,18 +75,18 @@ oauth.get('/google/callback', async (c) => {
 
         const updateResult = await c.env.DB.prepare(
             `UPDATE email_accounts 
-             SET alias = ?, encrypted_access_token = ?, encrypted_refresh_token = ?, token_expires_at = ?, status = 'active', updated_at = datetime('now')
+             SET alias = ?, encrypted_access_token = ?, encrypted_refresh_token = ?, token_expires_at = ?, granted_scopes = ?, status = 'active', updated_at = datetime('now')
              WHERE email_address = ? AND provider = 'google'`
         )
-            .bind(email, encryptedAccess, encryptedRefresh, expiresAt, email)
+            .bind(email, encryptedAccess, encryptedRefresh, expiresAt, tokens.scope ?? null, email)
             .run();
 
         if (updateResult.meta.changes === 0) {
             await c.env.DB.prepare(
-                `INSERT INTO email_accounts (alias, email_address, provider, encrypted_access_token, encrypted_refresh_token, token_expires_at)
-             VALUES (?, ?, 'google', ?, ?, ?)`
+                `INSERT INTO email_accounts (alias, email_address, provider, encrypted_access_token, encrypted_refresh_token, token_expires_at, granted_scopes)
+             VALUES (?, ?, 'google', ?, ?, ?, ?)`
             )
-                .bind(email, email, encryptedAccess, encryptedRefresh, expiresAt)
+                .bind(email, email, encryptedAccess, encryptedRefresh, expiresAt, tokens.scope ?? null)
                 .run();
         }
 
@@ -157,18 +157,18 @@ oauth.get('/microsoft/callback', async (c) => {
 
         const updateResult = await c.env.DB.prepare(
             `UPDATE email_accounts 
-             SET alias = ?, encrypted_access_token = ?, encrypted_refresh_token = ?, token_expires_at = ?, status = 'active', updated_at = datetime('now')
+             SET alias = ?, encrypted_access_token = ?, encrypted_refresh_token = ?, token_expires_at = ?, granted_scopes = ?, status = 'active', updated_at = datetime('now')
              WHERE email_address = ? AND provider = 'microsoft'`
         )
-            .bind(email, encryptedAccess, encryptedRefresh, expiresAt, email)
+            .bind(email, encryptedAccess, encryptedRefresh, expiresAt, tokens.scope ?? null, email)
             .run();
 
         if (updateResult.meta.changes === 0) {
             await c.env.DB.prepare(
-                `INSERT INTO email_accounts (alias, email_address, provider, encrypted_access_token, encrypted_refresh_token, token_expires_at)
-             VALUES (?, ?, 'microsoft', ?, ?, ?)`
+                `INSERT INTO email_accounts (alias, email_address, provider, encrypted_access_token, encrypted_refresh_token, token_expires_at, granted_scopes)
+             VALUES (?, ?, 'microsoft', ?, ?, ?, ?)`
             )
-                .bind(email, email, encryptedAccess, encryptedRefresh, expiresAt)
+                .bind(email, email, encryptedAccess, encryptedRefresh, expiresAt, tokens.scope ?? null)
                 .run();
         }
 

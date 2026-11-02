@@ -6,6 +6,9 @@ Gmail management, provider differences, retry safety and required migrations.
 Before running unattended agents, read the [agent operating guide](docs/integrations/AGENT_OPERATING_GUIDE.md)
 for request budgets, keepalives, bounded retries, quota cooldowns and incremental scans.
 
+See [Calendar access and recovery](docs/calendar-access-and-recovery.md) for bounded
+token refresh, separate email/calendar grants, safe error codes and permission auditing.
+
 e-zer0 is a self-hosted, secure bridge between your AI agents and your email accounts. It allows you to give AI tools (like Claude Desktop or custom agents) the ability to read, search, and manage your emails across Gmail, Microsoft 365, and Outlook—without ever handing over your raw email credentials.
 
 ## Why does this exist?

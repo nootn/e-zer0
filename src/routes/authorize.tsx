@@ -3,6 +3,7 @@ import { Hono, type Context } from 'hono';
 import type { Env, McpClient } from '../types';
 import { Layout, Alert } from '../views/layout';
 import { isAllowedRedirectUri, parseStoredJsonArray, requiresPkce } from '../lib/mcp-oauth';
+import { permissionAuditStatement } from '../lib/permission-audit';
 
 const authorize = new Hono<{ Bindings: Env; Variables: { userId: number; username: string } }>();
 const MAX_CLIENT_NAME_LENGTH = 100;
@@ -280,6 +281,7 @@ authorize.post('/', async (c) => {
 
     try {
         const statements = [
+            permissionAuditStatement(c.env.DB, client.id, userId, 'oauth_permissions_updated', accountIds),
             c.env.DB.prepare('UPDATE mcp_clients SET name = ? WHERE id = ?').bind(name, client.id),
             c.env.DB.prepare('DELETE FROM mcp_client_accounts WHERE mcp_client_id = ?').bind(client.id),
         ];
