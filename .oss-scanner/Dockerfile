@@ -14,6 +14,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .
 
+RUN chown -R node:node /src
+USER node
+
 # Bundle the Worker without deploying or requiring Cloudflare credentials.
 RUN npm run lint \
     && npm test \

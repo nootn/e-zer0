@@ -218,6 +218,10 @@ class FakePreparedStatement {
     }
 
     async run() {
+        // Audit contents and rollback use real SQLite in permission-audit.test.ts.
+        if (this.sql.includes('INSERT INTO audit_logs')) {
+            return { success: true };
+        }
         if (this.sql.includes('UPDATE mcp_clients SET last_used_at = datetime(?) WHERE id = ?')) {
             const [, id] = this.boundValues;
             const client = this.db.clients.find((row) => row.id === id);
@@ -396,7 +400,7 @@ it('retains correlation headers on a successful SDK initialise response', async 
         env
     );
     expect(response.status).toBe(200);
-    expect(response.headers.get('X-Ezer0-Catalog-Version')).toBe('1.1.1');
+    expect(response.headers.get('X-Ezer0-Catalog-Version')).toBe('1.1.2');
     expect(response.headers.get('X-Ezer0-Request-Id')).toBeTruthy();
     await response.text();
 });

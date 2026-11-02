@@ -4,6 +4,7 @@ import type { Env, EmailAccount } from '../types';
 import { Layout, Card, Alert, EmptyState } from '../views/layout';
 import { hasSetting } from '../lib/settings';
 import { refreshAccountToken } from '../lib/oauth/refresh';
+import { markAccountRefreshFailed } from '../lib/oauth/refresh-failure';
 
 const accounts = new Hono<{ Bindings: Env; Variables: { userId: number; username: string } }>();
 
@@ -141,9 +142,7 @@ accounts.post('/:id/refresh', async (c) => {
         await refreshAccountToken(c.env, account);
         return c.redirect('/accounts?message=' + encodeURIComponent('Token refreshed successfully.'));
     } catch (err: any) {
-        await c.env.DB.prepare(`UPDATE email_accounts SET status = 'error', updated_at = datetime('now') WHERE id = ?`)
-            .bind(id)
-            .run();
+        await markAccountRefreshFailed(c.env.DB, account, 'error');
         return c.redirect('/accounts?error=' + encodeURIComponent('Refresh failed: ' + err.message));
     }
 });

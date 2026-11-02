@@ -25,37 +25,45 @@ export async function refreshAccountToken(env: Env, account: EmailAccount): Prom
     let newAccessToken: string;
     let expiresIn: number;
     let newRefreshToken: string | undefined;
+    let scopes: string | undefined;
 
     if (account.provider === 'google') {
         const result = await refreshGoogleToken(refreshToken, creds.clientId, creds.clientSecret);
         newAccessToken = result.access_token;
         expiresIn = result.expires_in;
+        newRefreshToken = result.refresh_token;
+        scopes = result.scope;
     } else {
         const result = await refreshMicrosoftToken(refreshToken, creds.clientId, creds.clientSecret);
         newAccessToken = result.access_token;
         expiresIn = result.expires_in;
         newRefreshToken = result.refresh_token;
+        scopes = result.scope;
     }
 
     const encryptedAccess = await encrypt(newAccessToken, encryptionKey);
     const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
-    if (newRefreshToken) {
-        const encryptedRefresh = await encrypt(newRefreshToken, encryptionKey);
-        await env.DB.prepare(
-            `UPDATE email_accounts
-             SET encrypted_access_token = ?, encrypted_refresh_token = ?, token_expires_at = ?, status = 'active', updated_at = datetime('now')
-             WHERE id = ?`
+    const encryptedRefresh = newRefreshToken ? await encrypt(newRefreshToken, encryptionKey) : null;
+    // An overlapping refresh failure can change status without changing either credential.
+    await env.DB.prepare(
+        `UPDATE email_accounts
+         SET encrypted_access_token = ?, encrypted_refresh_token = COALESCE(?, encrypted_refresh_token),
+             token_expires_at = ?, granted_scopes = COALESCE(?, granted_scopes), status = 'active', updated_at = datetime('now')
+         WHERE id = ? AND status != 'revoked'
+           AND (status = ? OR (? = 'active' AND status IN ('expired', 'error')))
+           AND encrypted_refresh_token IS ? AND encrypted_access_token IS ?`
+    )
+        .bind(
+            encryptedAccess,
+            encryptedRefresh,
+            expiresAt,
+            scopes ?? null,
+            account.id,
+            account.status,
+            account.status,
+            account.encrypted_refresh_token,
+            account.encrypted_access_token
         )
-            .bind(encryptedAccess, encryptedRefresh, expiresAt, account.id)
-            .run();
-    } else {
-        await env.DB.prepare(
-            `UPDATE email_accounts
-             SET encrypted_access_token = ?, token_expires_at = ?, status = 'active', updated_at = datetime('now')
-             WHERE id = ?`
-        )
-            .bind(encryptedAccess, expiresAt, account.id)
-            .run();
-    }
+        .run();
 }

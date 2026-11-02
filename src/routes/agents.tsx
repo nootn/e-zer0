@@ -3,6 +3,7 @@ import { Hono, type Context } from 'hono';
 import type { Env, McpClient, EmailAccount } from '../types';
 import { Layout, Card, Alert, EmptyState } from '../views/layout';
 import { generateSalt, hashPassword, generateClientId, generateClientSecret } from '../lib/crypto';
+import { permissionAuditStatement } from '../lib/permission-audit';
 
 type AgentEnv = {
     Bindings: Env;
@@ -124,10 +125,12 @@ export async function updateAgentNameAndAccounts(
     agentId: string | number,
     name: string,
     accountIds: number[],
-    calendarIds?: number[]
+    calendarIds?: number[],
+    userId?: number
 ) {
     await validateAccountSelections(db, accountIds, calendarIds || []);
     await db.batch([
+        permissionAuditStatement(db, agentId, userId, 'agent_permissions_updated', accountIds, calendarIds),
         db.prepare('UPDATE mcp_clients SET name = ? WHERE id = ?').bind(name, agentId),
         ...replaceGrants(db, 'mcp_client_accounts', agentId, accountIds),
         ...(calendarIds === undefined ? [] : replaceGrants(db, 'mcp_client_calendar_accounts', agentId, calendarIds)),
@@ -408,7 +411,17 @@ agents.post('/create', async (c) => {
 });
 
 agents.post('/:id/revoke', async (c) => {
-    await c.env.DB.prepare('UPDATE mcp_clients SET is_active = 0 WHERE id = ?').bind(c.req.param('id')).run();
+    const id = c.req.param('id');
+    try {
+        await c.env.DB.batch([
+            permissionAuditStatement(c.env.DB, id, c.get('userId'), 'agent_revoked'),
+            c.env.DB.prepare('UPDATE mcp_clients SET is_active = 0 WHERE id = ?').bind(id),
+        ]);
+    } catch (error) {
+        return c.redirect(
+            '/agents?error=' + encodeURIComponent(error instanceof Error ? error.message : 'Could not revoke agent')
+        );
+    }
     return c.redirect('/agents?message=' + encodeURIComponent('Agent revoked successfully.'));
 });
 
@@ -435,7 +448,7 @@ agents.post('/:id/accounts', async (c) => {
         .first();
     if (!client) return c.redirect('/agents?error=' + encodeURIComponent('Agent not found or is revoked.'));
     try {
-        await updateAgentNameAndAccounts(c.env.DB, id, name, accountIds, calendarIds);
+        await updateAgentNameAndAccounts(c.env.DB, id, name, accountIds, calendarIds, c.get('userId'));
     } catch (error) {
         return c.redirect(
             '/agents?edit=' +
@@ -448,7 +461,7 @@ agents.post('/:id/accounts', async (c) => {
 });
 
 // Retain the existing calendar-only endpoint for older open pages.
-export async function updateCalendarGrants(db: D1Database, agentId: string, accountIds: number[]) {
+export async function updateCalendarGrants(db: D1Database, agentId: string, accountIds: number[], userId?: number) {
     const client = await db.prepare('SELECT id FROM mcp_clients WHERE id = ? AND is_active = 1').bind(agentId).first();
     if (!client) throw new Error('Agent not found or revoked');
     try {
@@ -456,7 +469,10 @@ export async function updateCalendarGrants(db: D1Database, agentId: string, acco
     } catch {
         throw new Error('Invalid calendar account selection');
     }
-    await db.batch(replaceGrants(db, 'mcp_client_calendar_accounts', agentId, accountIds));
+    await db.batch([
+        permissionAuditStatement(db, agentId, userId, 'agent_calendar_permissions_updated', undefined, accountIds),
+        ...replaceGrants(db, 'mcp_client_calendar_accounts', agentId, accountIds),
+    ]);
 }
 agents.post('/:id/calendars', async (c) => {
     const form = await c.req.formData();
@@ -464,7 +480,8 @@ agents.post('/:id/calendars', async (c) => {
         await updateCalendarGrants(
             c.env.DB,
             c.req.param('id'),
-            form.getAll('calendar_account_ids').map((value) => Number(value.toString()))
+            form.getAll('calendar_account_ids').map((value) => Number(value.toString())),
+            c.get('userId')
         );
         return c.redirect('/agents?message=' + encodeURIComponent('Calendar access updated.'));
     } catch (error) {

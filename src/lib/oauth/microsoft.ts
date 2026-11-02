@@ -1,4 +1,6 @@
 // Microsoft OAuth 2.0 helpers (Azure AD v2)
+import type { OAuthCodeExchangeResponse, OAuthTokenResponse } from '../../types';
+import { oauthRefreshError } from './refresh-errors';
 
 const MS_AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
 const MS_TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
@@ -30,7 +32,7 @@ export async function exchangeMicrosoftCode(
     clientId: string,
     clientSecret: string,
     redirectUri: string
-): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
+): Promise<OAuthCodeExchangeResponse> {
     const res = await fetch(MS_TOKEN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -55,7 +57,7 @@ export async function refreshMicrosoftToken(
     refreshToken: string,
     clientId: string,
     clientSecret: string
-): Promise<{ access_token: string; refresh_token?: string; expires_in: number }> {
+): Promise<OAuthTokenResponse> {
     const res = await fetch(MS_TOKEN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -69,8 +71,7 @@ export async function refreshMicrosoftToken(
     });
 
     if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`Microsoft token refresh failed: ${err}`);
+        throw await oauthRefreshError('microsoft', res);
     }
 
     return res.json();

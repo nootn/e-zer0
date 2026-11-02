@@ -1,4 +1,6 @@
 // Google OAuth 2.0 helpers
+import type { OAuthCodeExchangeResponse, OAuthTokenResponse } from '../../types';
+import { oauthRefreshError } from './refresh-errors';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -32,7 +34,7 @@ export async function exchangeGoogleCode(
     clientId: string,
     clientSecret: string,
     redirectUri: string
-): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
+): Promise<OAuthCodeExchangeResponse> {
     const res = await fetch(GOOGLE_TOKEN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -57,7 +59,7 @@ export async function refreshGoogleToken(
     refreshToken: string,
     clientId: string,
     clientSecret: string
-): Promise<{ access_token: string; expires_in: number }> {
+): Promise<OAuthTokenResponse> {
     const res = await fetch(GOOGLE_TOKEN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -70,8 +72,7 @@ export async function refreshGoogleToken(
     });
 
     if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`Google token refresh failed: ${err}`);
+        throw await oauthRefreshError('google', res);
     }
 
     return res.json();

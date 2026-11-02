@@ -1,4 +1,10 @@
 // Log transport outcomes, never tokens, URLs, queries, response bodies or email content.
+export function retryAfterSeconds(headers: Headers): number | undefined {
+    const value = headers.get('Retry-After');
+    const delay = value && /^\d+$/.test(value) ? Number(value) : value ? (Date.parse(value) - Date.now()) / 1000 : NaN;
+    return Number.isFinite(delay) && delay >= 0 ? Math.ceil(delay) : undefined;
+}
+
 export async function providerRequest(provider: string, url: string, init?: RequestInit): Promise<Response> {
     const started = Date.now();
     const requestId = crypto.randomUUID();

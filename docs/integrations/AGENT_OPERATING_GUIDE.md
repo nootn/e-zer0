@@ -77,6 +77,18 @@ error code and available request/Ray ID without tokens or message contents.
 - Agree per-run read/write budgets and avoid overlapping runs. Report remaining
   work rather than silently exhausting the budget or starting a retry loop.
 
+## Calendar-specific access diagnostics
+
+Use the separate calendar account list and current numeric IDs. Calendar reads
+perform bounded token recovery on the server; do not stack client refresh loops
+on a persistent failure. Read `structuredContent.error.code` to distinguish missing
+agent grants, expired credentials, missing provider scopes and calendar sharing
+denials. A calendar error does not imply email access is denied. A client-blocked,
+unattempted or budget-deferred account is not a server permission failure.
+Never override a genuine prior user denial without approval. See
+[calendar access and recovery](../calendar-access-and-recovery.md) for error codes,
+scope metadata and prospective permission audits.
+
 ## Keep writes safe
 
 Current `manage_email` and `organize_email` operations act on one message per call.

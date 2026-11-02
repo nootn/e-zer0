@@ -63,13 +63,15 @@ MCP login token are distinct. Changing the MCP token lifetime does not change
 Google's expiry. Production removes the Testing deadline, not all possible expiry;
 there is no guaranteed never-expiring token setting.
 
-Current e-zer0 behaviour is scheduled refresh for near-expiry tokens on active
-accounts. It also refreshes unused active accounts; MCP calls do not currently
-perform synchronous refresh or implement used-versus-idle retention. Consequently,
+e-zer0 schedules refresh for near-expiry tokens on active accounts, including
+unused accounts. Calendar reads also perform bounded on-demand refresh using
+existing consent; email tools retain their existing behaviour. There is no
+used-versus-idle retention policy. See [calendar recovery](calendar-access-and-recovery.md).
+Consequently,
 do not rely on Google's six-month refresh-token inactivity rule to revoke unused
 accounts. Explicitly revoke unwanted agent grants or disconnect an account when
-you no longer want it connected. Any future on-demand refresh policy would still
-need to handle revocation and could not bypass Testing's deadline.
+you no longer want it connected. On-demand refresh cannot bypass revocation or
+Testing's deadline.
 
 Sources: [seven-day Testing rules](https://support.google.com/cloud/answer/15549945?hl=en),
 [refresh-token expiry and revocation](https://developers.google.com/identity/protocols/oauth2/).

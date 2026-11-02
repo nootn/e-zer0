@@ -46,9 +46,21 @@ export interface EmailAccount {
     encrypted_access_token: string | null;
     encrypted_refresh_token: string | null;
     token_expires_at: string | null;
+    granted_scopes?: string | null;
     status: 'active' | 'expired' | 'error' | 'revoked';
     created_at: string;
     updated_at: string;
+}
+
+export interface OAuthTokenResponse {
+    access_token: string;
+    refresh_token?: string;
+    expires_in: number;
+    scope?: string;
+}
+
+export interface OAuthCodeExchangeResponse extends OAuthTokenResponse {
+    refresh_token: string;
 }
 
 export interface McpClient {
@@ -153,6 +165,23 @@ export interface CalendarSummary {
     name: string;
     primary: boolean;
     time_zone?: string;
+}
+
+export interface CalendarAccessDiagnostics {
+    account_id: number;
+    token_expires_at: string | null;
+    scopes_recorded: boolean;
+    refreshed: boolean;
+}
+
+export interface CalendarErrorDetails {
+    code: string;
+    message: string;
+    account_id?: number;
+    http_status?: number;
+    provider?: 'google' | 'microsoft';
+    provider_reason?: string;
+    retry_after_seconds?: number;
 }
 
 export interface CalendarEvent {

@@ -32,6 +32,7 @@ import {
 import { indexEmailsBatch, searchSimilar, deleteFromIndex } from '../lib/vector';
 import { sanitizeEmailContent } from '../lib/sanitizer';
 import { listProviderCalendars, getProviderCalendarEvents } from '../lib/calendar';
+import { withCalendarAccess } from '../lib/oauth/calendar-access';
 import {
     listGoogleTaskLists,
     listGoogleTasks,
@@ -109,14 +110,13 @@ async function getAccountToken(
     db: D1Database,
     accountId: number,
     encryptionKey: string,
-    clientId: string,
-    access: 'mail' | 'calendar' = 'mail'
+    clientId: string
 ): Promise<{ account: EmailAccount; accessToken: string }> {
     // Authorize MCP client to access this account
     const permitted = await db
         .prepare(
             `
-        SELECT 1 FROM ${access === 'calendar' ? 'mcp_client_calendar_accounts' : 'mcp_client_accounts'} mca
+        SELECT 1 FROM mcp_client_accounts mca
         JOIN mcp_clients mc ON mc.id = mca.mcp_client_id
         WHERE mc.client_id = ? AND mc.is_active = 1 AND mca.email_account_id = ?
     `
@@ -196,14 +196,9 @@ export async function listCalendarAccounts(env: Env, clientId: string) {
 }
 
 export async function listCalendars(env: Env, clientId: string, accountId: number, pageToken?: string) {
-    const { account, accessToken } = await getAccountToken(
-        env.DB,
-        accountId,
-        env.ENCRYPTION_KEY!,
-        clientId,
-        'calendar'
+    const result = await withCalendarAccess(env, clientId, accountId, (account, token) =>
+        listProviderCalendars(account.provider, token, pageToken)
     );
-    const result = await listProviderCalendars(account.provider, accessToken, pageToken);
     return {
         ...result,
         calendars: result.calendars.map((calendar) => {
@@ -227,21 +222,8 @@ export async function getCalendarEvents(
     count: number,
     pageToken?: string
 ) {
-    const { account, accessToken } = await getAccountToken(
-        env.DB,
-        accountId,
-        env.ENCRYPTION_KEY!,
-        clientId,
-        'calendar'
-    );
-    const result = await getProviderCalendarEvents(
-        account.provider,
-        accessToken,
-        calendarId,
-        start,
-        end,
-        count,
-        pageToken
+    const result = await withCalendarAccess(env, clientId, accountId, (account, token) =>
+        getProviderCalendarEvents(account.provider, token, calendarId, start, end, count, pageToken)
     );
     return {
         ...result,

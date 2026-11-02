@@ -181,7 +181,7 @@ No new short timeout or automatic mutation retry is introduced. A simulated
 promising a 120-second allowance does not necessarily change connector timeouts.
 
 Correlate UTC timings with transport entry, response-start/completion/failure,
-`X-Ezer0-Request-Id`, CF Ray and `X-Ezer0-Catalog-Version` (`1.1.1`). Response-start
+`X-Ezer0-Request-Id`, CF Ray and `X-Ezer0-Catalog-Version` (`1.1.2`). Response-start
 or HTTP 200 alone does not prove tool success. Provider header timing/status logs
 exclude URLs/tokens/content; new tools also emit tool lifecycle logs and audits.
 
