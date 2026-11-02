@@ -44,6 +44,8 @@ async function fixture(provider: 'google' | 'microsoft' = 'google', expiry = Dat
                 async run() {
                     writes.push({ sql, values });
                     if (sql.includes('UPDATE email_accounts')) {
+                        expect(sql).toContain('SET encrypted_access_token = ?');
+                        expect(sql).toContain("status = 'active'");
                         account.encrypted_access_token = String(values[0]);
                         if (values[1] !== null) account.encrypted_refresh_token = String(values[1]);
                         account.token_expires_at = String(values[2]);
@@ -152,6 +154,42 @@ it('coalesces simultaneous near-expiry refreshes within one isolate', async () =
     const results = await Promise.all([listCalendars(f.env, 'client', 1), listCalendars(f.env, 'client', 1)]);
     expect(results.every((result) => result.access.refreshed)).toBe(true);
     expect(refreshes).toBe(1);
+    expect(f.writes).toHaveLength(1);
+});
+
+it('reuses newer credentials when a delayed 401 arrives after another call refreshed', async () => {
+    const f = await fixture();
+    let release!: () => void;
+    let started!: () => void;
+    const blocked = new Promise<void>((resolve) => (release = resolve));
+    const firstRead = new Promise<void>((resolve) => (started = resolve));
+    let reads = 0,
+        refreshes = 0;
+    vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string, init: RequestInit) => {
+            if (url.includes('/token')) {
+                refreshes++;
+                return Response.json({ access_token: 'fresh-token', expires_in: 3600 });
+            }
+            reads++;
+            if (reads === 1) {
+                started();
+                await blocked;
+                return new Response(null, { status: 401 });
+            }
+            if (reads === 2) return new Response(null, { status: 401 });
+            expect(init.headers).toMatchObject({ Authorization: 'Bearer fresh-token' });
+            return Response.json({ items: [] });
+        })
+    );
+    const delayed = listCalendars(f.env, 'client', 1);
+    await firstRead;
+    await listCalendars(f.env, 'client', 1);
+    release();
+    await delayed;
+    expect(refreshes).toBe(1);
+    expect(reads).toBe(4);
     expect(f.writes).toHaveLength(1);
 });
 
@@ -279,7 +317,7 @@ it.each(['denied', 'inactive', 'forbidden', 'invalid_grant', 'repeated_401', 're
         const codes = {
             denied: 'calendar_grant_missing',
             inactive: 'calendar_account_inactive',
-            forbidden: 'provider_scope_missing',
+            forbidden: 'provider_calendar_forbidden',
             invalid_grant: 'provider_reauthentication_required',
             repeated_401: 'provider_token_invalid',
             revoked_during_refresh: 'calendar_grant_missing',
@@ -289,6 +327,7 @@ it.each(['denied', 'inactive', 'forbidden', 'invalid_grant', 'repeated_401', 're
         expect(refreshes).toBe(['denied', 'inactive', 'forbidden'].includes(scenario) ? 0 : 1);
         expect(reads).toBe(['denied', 'inactive'].includes(scenario) ? 0 : scenario === 'repeated_401' ? 2 : 1);
         expect(f.account.status).toBe(scenario === 'inactive' ? 'expired' : 'active');
+        expect(f.writes).toHaveLength(['repeated_401', 'revoked_during_refresh'].includes(scenario) ? 1 : 0);
         expect(
             f.writes.every((write) => !write.sql.includes('mcp_client') && !write.sql.includes("status = 'error'"))
         ).toBe(true);

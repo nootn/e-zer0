@@ -45,11 +45,14 @@ export async function refreshAccountToken(env: Env, account: EmailAccount): Prom
     const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
     const encryptedRefresh = newRefreshToken ? await encrypt(newRefreshToken, encryptionKey) : null;
+    // An overlapping refresh failure can change status without changing either credential.
     await env.DB.prepare(
         `UPDATE email_accounts
          SET encrypted_access_token = ?, encrypted_refresh_token = COALESCE(?, encrypted_refresh_token),
              token_expires_at = ?, granted_scopes = COALESCE(?, granted_scopes), status = 'active', updated_at = datetime('now')
-         WHERE id = ? AND status = ? AND encrypted_refresh_token IS ? AND encrypted_access_token IS ?`
+         WHERE id = ? AND status != 'revoked'
+           AND (status = ? OR (? = 'active' AND status IN ('expired', 'error')))
+           AND encrypted_refresh_token IS ? AND encrypted_access_token IS ?`
     )
         .bind(
             encryptedAccess,
@@ -57,6 +60,7 @@ export async function refreshAccountToken(env: Env, account: EmailAccount): Prom
             expiresAt,
             scopes ?? null,
             account.id,
+            account.status,
             account.status,
             account.encrypted_refresh_token,
             account.encrypted_access_token

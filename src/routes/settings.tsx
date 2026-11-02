@@ -424,12 +424,12 @@ settings.get('/', async (c) => {
                     replies are saved as drafts only; review and send them yourself in Gmail or Outlook.
                 </p>
                 <p style="font-size:13px; color:var(--text-secondary);">
-                    Calendar reads refresh tokens expiring within 60 seconds and attempt at most one token refresh per
-                    call using existing consent. A provider 401 means invalid or expired credentials, not proof of
-                    missing calendar consent. A 403 is not automatically retried. Calendar failures do not revoke grants
-                    or mark email access as broken. Toggling Calendar in Agents changes the agent grant, not provider
-                    OAuth consent; do not reconnect or broaden permissions without explaining which account and
-                    permission need attention.
+                    Calendar reads refresh access tokens expiring within 60 seconds and attempt at most one token
+                    refresh per call using existing consent. A provider 401 means invalid or expired credentials, not
+                    proof of missing calendar consent. A 403 is not automatically retried. Calendar failures do not
+                    revoke grants or mark email access as broken. Toggling Calendar in Agents changes the agent grant,
+                    not provider OAuth consent; do not reconnect or broaden permissions without explaining which account
+                    and permission need attention.
                 </p>
                 <p style="font-size:13px; color:var(--text-secondary);">
                     Calendar errors include structuredContent.error.code to distinguish calendar_grant_missing,

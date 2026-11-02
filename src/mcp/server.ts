@@ -270,6 +270,19 @@ export function createMcpServer(env: Env, clientId: string, clientName: string |
             await logAudit(env.DB, clientId, clientName, action, target, access ? JSON.stringify(access) : null, true);
             return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
         } catch (error) {
+            if (!(error instanceof CalendarAccessError)) {
+                const errorType = error instanceof Error ? error.name : '';
+                console.error(
+                    JSON.stringify({
+                        event: 'calendar_operation_failed',
+                        action,
+                        account_id: accountId,
+                        error_type: /^(Error|TypeError|SyntaxError|AbortError|TimeoutError)$/.test(errorType)
+                            ? errorType
+                            : 'unknown',
+                    })
+                );
+            }
             const failure =
                 error instanceof CalendarAccessError
                     ? error.toJSON()

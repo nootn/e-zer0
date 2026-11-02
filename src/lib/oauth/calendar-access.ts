@@ -42,6 +42,15 @@ export async function withCalendarAccess<T extends object>(
     }
     let account = await loadAccount();
     let refreshed = false;
+    async function useNewerCredentials() {
+        const latest = await loadAccount();
+        const expiry = latest.token_expires_at ? Date.parse(latest.token_expires_at) : NaN;
+        const usable =
+            latest.encrypted_access_token !== account.encrypted_access_token &&
+            (!Number.isFinite(expiry) || expiry > Date.now());
+        account = latest;
+        return usable;
+    }
     async function refresh() {
         refreshed = true;
         let pending = refreshing.get(env.DB);
@@ -51,7 +60,10 @@ export async function withCalendarAccess<T extends object>(
         }
         let operation = pending.get(accountId);
         if (!operation) {
-            operation = refreshAccountToken(env, account);
+            operation = (async () => {
+                if (await useNewerCredentials()) return;
+                await refreshAccountToken(env, account);
+            })();
             pending.set(accountId, operation);
         }
         try {
@@ -66,15 +78,7 @@ export async function withCalendarAccess<T extends object>(
                     undefined,
                     error.retryAfterSeconds
                 );
-            const latest = await loadAccount();
-            const latestExpiry = latest.token_expires_at ? Date.parse(latest.token_expires_at) : NaN;
-            if (
-                latest.encrypted_access_token !== account.encrypted_access_token &&
-                (!Number.isFinite(latestExpiry) || latestExpiry > Date.now())
-            ) {
-                account = latest;
-                return;
-            }
+            if (await useNewerCredentials()) return;
             const invalidGrant = error instanceof OAuthRefreshError && error.code === 'invalid_grant';
             throw new CalendarAccessError(
                 invalidGrant ? 'provider_reauthentication_required' : 'provider_refresh_failed',

@@ -5,7 +5,9 @@ afterEach(() => vi.unstubAllGlobals());
 
 it.each([
     ['google', 401, 'authError', 'provider_token_invalid'],
-    ['google', 403, 'insufficientPermissions', 'provider_scope_missing'],
+    ['google', 403, 'insufficientPermissions', 'provider_calendar_forbidden'],
+    ['google', 403, 'insufficient_scope', 'provider_scope_missing'],
+    ['google', 403, 'ACCESS_TOKEN_SCOPE_INSUFFICIENT', 'provider_scope_missing'],
     ['google', 403, 'rateLimitExceeded', 'provider_rate_limited'],
     ['google', 404, 'notFound', 'provider_calendar_unavailable'],
     ['microsoft', 401, 'InvalidAuthenticationToken', 'provider_token_invalid'],
@@ -27,6 +29,27 @@ it.each([
     expect(String(error)).not.toContain('private-event-content');
     expect(String(error)).not.toContain('secret');
     if (status === 401) expect(String(error)).not.toContain('consent is missing');
+});
+
+it('prefers explicit scope evidence over a generic permission reason', async () => {
+    vi.stubGlobal(
+        'fetch',
+        vi.fn(async () =>
+            Response.json(
+                {
+                    error: {
+                        errors: [{ reason: 'insufficientPermissions' }],
+                        details: [{ reason: 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' }],
+                    },
+                },
+                { status: 403 }
+            )
+        )
+    );
+    await expect(listProviderCalendars('google', 'secret')).rejects.toMatchObject({
+        code: 'provider_scope_missing',
+        providerReason: 'ACCESS_TOKEN_SCOPE_INSUFFICIENT',
+    });
 });
 
 it('handles empty provider error bodies and does not echo unknown reasons', async () => {

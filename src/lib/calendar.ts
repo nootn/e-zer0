@@ -10,7 +10,7 @@ import type {
 
 // Read-only requests; provider errors must not leak calendar content into audit logs.
 import { providerRequest } from './provider-request';
-import { calendarProviderError } from './calendar-errors';
+import { CalendarAccessError, calendarProviderError } from './calendar-errors';
 async function readCalendar<T>(url: URL, token: string): Promise<T> {
     const response = await providerRequest('calendar', url.toString(), {
         headers: {
@@ -30,10 +30,14 @@ function calendarUrl(provider: 'google' | 'microsoft', path: string, pageToken?:
             : `https://graph.microsoft.com/v1.0/me/${path}`
     );
     if (pageToken && provider === 'microsoft') {
-        const next = new URL(pageToken);
-        if (next.origin !== url.origin || next.pathname !== url.pathname || next.username || next.password)
-            throw new Error('Invalid calendar page token');
-        return next;
+        try {
+            const next = new URL(pageToken);
+            if (next.origin === url.origin && next.pathname === url.pathname && !next.username && !next.password)
+                return next;
+        } catch {
+            // Malformed URLs use the same safe validation error as out-of-scope URLs.
+        }
+        throw new CalendarAccessError('calendar_request_invalid', 'Invalid calendar page token');
     }
     if (pageToken) url.searchParams.set('pageToken', pageToken);
     return url;
@@ -77,7 +81,10 @@ export async function getProviderCalendarEvents(
 ): Promise<{ events: CalendarEvent[]; next_page_token?: string }> {
     const duration = Date.parse(end) - Date.parse(start);
     if (!Number.isFinite(duration) || duration <= 0 || duration > 366 * 86400000)
-        throw new Error('Calendar range must be positive and at most 366 days');
+        throw new CalendarAccessError(
+            'calendar_request_invalid',
+            'Calendar range must be positive and at most 366 days'
+        );
     const encodedId =
         provider === 'microsoft'
             ? encodeURIComponent(calendarId).replace(/%3D/gi, '=')

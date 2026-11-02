@@ -25,7 +25,9 @@ refresh, and token refresh never asks for additional OAuth scopes.
 Concurrent refreshes are coalesced within one Worker isolate, not across isolates.
 Refresh success and failure writes compare the stored status, access token and
 refresh token against their original snapshot so an older response cannot undo
-a reconnect, reactivate a revoked account or replace newer credentials. Grants
+a reconnect, reactivate a revoked account or replace newer credentials. A successful
+refresh from an originally active snapshot may recover a concurrent refresh-failure
+status (`expired` or `error`) only while both encrypted credentials still match. Grants
 and account state are rechecked before the post-refresh read. A failed stale
 refresh can use newer valid credentials instead of asking for another reconnect.
 The existing background refresh remains in place; email tools retain their existing
@@ -50,20 +52,22 @@ Failed calendar tools retain `isError: true` and a readable text error, adding
 provider reason and retry delay. Unknown provider messages, tokens and raw error
 bodies are never echoed. A 401 alone is not evidence of missing consent.
 
-| Code                                                            | Meaning / caller action                                                                                                  |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `calendar_grant_missing`                                        | This active client lacks the requested calendar grant. Do not infer email restrictions.                                  |
-| `calendar_account_inactive`                                     | The granted provider account is inactive or unavailable; grants were not removed.                                        |
-| `calendar_credentials_missing` / `calendar_credentials_invalid` | Stored credentials or encryption configuration need administrator review.                                                |
-| `provider_token_invalid`                                        | Invalid/expired provider token; recovery was exhausted or unavailable. Do not blindly retry.                             |
-| `provider_reauthentication_required`                            | Refresh returned `invalid_grant`; ask approval to reconnect this provider account.                                       |
-| `provider_refresh_failed`                                       | Refresh failed for another reason; check connectivity/configuration, not the permission checkboxes.                      |
-| `provider_scope_missing`                                        | Provider explicitly reported insufficient scopes; explain the account and consent needed before requesting reconnection. |
-| `provider_calendar_forbidden` / `provider_calendar_unavailable` | Provider denied access or the calendar is missing/not readable. Check sharing/policy/ID, not every account's grants.     |
-| `provider_rate_limited`                                         | Defer and honour `retry_after_seconds` when supplied; do not reconnect.                                                  |
-| `provider_calendar_failed`                                      | Other provider HTTP failure; inspect status and request correlation.                                                     |
-| `calendar_request_aborted` / `calendar_request_timeout`         | Abort/timeout, not proof of human cancellation.                                                                          |
-| `calendar_operation_failed`                                     | Other failure; diagnose before repeating requests.                                                                       |
+| Code                                                            | Meaning / caller action                                                                                                                  |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `calendar_request_invalid`                                      | Correct the date range or use a valid provider continuation token.                                                                       |
+| `calendar_grant_missing`                                        | This active client lacks the requested calendar grant. Do not infer email restrictions.                                                  |
+| `calendar_account_inactive`                                     | The granted provider account is inactive or unavailable; grants were not removed.                                                        |
+| `calendar_credentials_missing`                                  | Follow the message: absent access token requires approved reconnection; unavailable encryption configuration needs administrator review. |
+| `calendar_credentials_invalid`                                  | Stored credentials could not be decrypted; ask the administrator to check encryption configuration before reconnecting.                  |
+| `provider_token_invalid`                                        | Invalid/expired provider token; recovery was exhausted or unavailable. Do not blindly retry.                                             |
+| `provider_reauthentication_required`                            | Refresh returned `invalid_grant`; ask approval to reconnect this provider account.                                                       |
+| `provider_refresh_failed`                                       | Refresh failed for another reason; check connectivity/configuration, not the permission checkboxes.                                      |
+| `provider_scope_missing`                                        | Provider explicitly reported insufficient scopes; explain the account and consent needed before requesting reconnection.                 |
+| `provider_calendar_forbidden` / `provider_calendar_unavailable` | Provider denied access or the calendar is missing/not readable. Check sharing/policy/ID, not every account's grants.                     |
+| `provider_rate_limited`                                         | Defer and honour `retry_after_seconds` when supplied; do not reconnect.                                                                  |
+| `provider_calendar_failed`                                      | Other provider HTTP failure; inspect status and request correlation.                                                                     |
+| `calendar_request_aborted` / `calendar_request_timeout`         | Abort/timeout, not proof of human cancellation.                                                                                          |
+| `calendar_operation_failed`                                     | Other failure; diagnose before repeating requests.                                                                                       |
 
 Provider scopes are stored in `email_accounts.granted_scopes` only when actually
 returned by OAuth. Existing rows start at NULL (unknown), not missing permission.

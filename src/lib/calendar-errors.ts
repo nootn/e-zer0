@@ -43,6 +43,7 @@ const safeReasons = new Set([
     'quotaExceeded',
     'TooManyRequests',
 ]);
+const scopeReasons = new Set(['insufficient_scope', 'ACCESS_TOKEN_SCOPE_INSUFFICIENT']);
 
 export async function calendarProviderError(response: Response, provider: 'google' | 'microsoft') {
     let reason: string | undefined;
@@ -55,7 +56,9 @@ export async function calendarProviderError(response: Response, provider: 'googl
             ...(body.error?.errors || []).map((e) => e.reason),
             ...(body.error?.details || []).map((e) => e.reason),
         ];
-        reason = reasons.find((value): value is string => typeof value === 'string' && safeReasons.has(value));
+        reason =
+            reasons.find((value): value is string => typeof value === 'string' && scopeReasons.has(value)) ??
+            reasons.find((value): value is string => typeof value === 'string' && safeReasons.has(value));
     } catch {
         /* Error responses may be empty or non-JSON. Never echo their contents. */
     }
@@ -68,10 +71,7 @@ export async function calendarProviderError(response: Response, provider: 'googl
             provider,
             reason
         );
-    if (
-        status === 403 &&
-        ['insufficientPermissions', 'insufficient_scope', 'ACCESS_TOKEN_SCOPE_INSUFFICIENT'].includes(reason || '')
-    )
+    if (status === 403 && scopeReasons.has(reason || ''))
         return new CalendarAccessError(
             'provider_scope_missing',
             'Calendar provider reports insufficient OAuth scopes. Ask the user to reconnect this account with calendar consent; existing email and calendar grants were not changed.',
